@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>מעצב חכם</title>
+<meta name="theme-color" content="#2f2a26">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="מעצב חכם">
+<style>
+:root{
+  --bg:#f6f2ec; --card:#fff; --ink:#2f2a26; --muted:#7a7068; --line:#e6ddd2;
+  --accent:#a86b4a; --accent2:#c9a27e; --red:#c0392b; --orange:#d68910; --green:#2e8b57;
+  --r:14px; --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Segoe UI",Heebo,Arial,sans-serif;font-size:16px}
+header{position:sticky;top:0;z-index:20;background:var(--ink);color:#fff;padding:calc(10px + var(--safe-t)) 14px 10px;display:flex;align-items:center;gap:10px}
+header h1{font-size:18px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header button{background:none;border:0;color:#fff;font-size:22px;padding:4px 8px}
+main{padding:14px 14px calc(90px + var(--safe-b));max-width:900px;margin:0 auto}
+nav.tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;z-index:20;padding-bottom:var(--safe-b)}
+nav.tabs button{flex:1;background:none;border:0;padding:8px 2px 10px;font-size:12px;color:var(--muted)}
+nav.tabs button b{display:block;font-size:22px}
+nav.tabs button.on{color:var(--accent);font-weight:700}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1;min-width:0}
+.list-item{display:flex;align-items:center;gap:12px;cursor:pointer}
+.list-item .ic{font-size:28px;width:44px;height:44px;border-radius:12px;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden}
+.list-item .ic img{width:100%;height:100%;object-fit:cover}
+.muted{color:var(--muted);font-size:13px}
+h2{font-size:20px;margin:4px 0 12px}
+h3{font-size:16px;margin:0 0 10px}
+button.btn{background:var(--accent);color:#fff;border:0;border-radius:12px;padding:12px 16px;font-size:15px;font-weight:600;cursor:pointer}
+button.btn.sec{background:#fff;color:var(--ink);border:1px solid var(--line)}
+button.btn.danger{background:#fff;color:var(--red);border:1px solid #f0c9c4}
+button.btn.sm{padding:7px 11px;font-size:13px;border-radius:10px}
+button.btn.full{width:100%}
+button:disabled{opacity:.5}
+input,select,textarea{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+textarea{min-height:80px;resize:vertical}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:20px;padding:7px 12px;font-size:13px;cursor:pointer}
+.chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.seg{display:flex;background:#ece5dc;border-radius:12px;padding:3px;margin-bottom:12px}
+.seg button{flex:1;border:0;background:none;padding:9px 4px;border-radius:10px;font-size:14px;color:var(--muted)}
+.seg button.on{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.thumbs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.thumbs .t{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:#eee;cursor:pointer}
+.thumbs .t img{width:100%;height:100%;object-fit:cover}
+.thumbs .t .x{position:absolute;top:4px;left:4px;background:rgba(0,0,0,.55);color:#fff;border:0;border-radius:50%;width:26px;height:26px;font-size:14px}
+.thumbs .t.sel{outline:3px solid var(--accent)}
+.rule{display:flex;gap:8px;padding:8px 10px;border-radius:10px;margin-bottom:6px;font-size:14px;line-height:1.4}
+.rule.red{background:#fdecea}.rule.orange{background:#fff4e0}.rule.green{background:#e8f5ee}
+.dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.dot.red{background:var(--red)}.dot.orange{background:var(--orange)}.dot.green{background:var(--green)}
+.check-row{border-bottom:1px solid var(--line);padding:10px 0}
+.check-row:last-child{border:0}
+.check-row .res{font-size:13px;margin-top:6px}
+.ba{position:relative;width:100%;border-radius:12px;overflow:hidden;background:#000;user-select:none;touch-action:none}
+.ba img{display:block;width:100%}
+.ba .after{position:absolute;inset:0;overflow:hidden}
+.ba .after img{position:absolute;top:0;right:0;width:100%;height:100%;object-fit:cover}
+.ba .handle{position:absolute;top:0;bottom:0;width:3px;background:#fff;box-shadow:0 0 6px rgba(0,0,0,.5)}
+.ba .handle:after{content:"⇆";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;color:var(--ink);border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.ba .lbl{position:absolute;top:8px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;padding:3px 8px;border-radius:8px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+.modal .sheet{background:var(--bg);width:100%;max-width:700px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 14px calc(16px + var(--safe-b))}
+.modal .sheet .top{display:flex;align-items:center;margin-bottom:10px}
+.modal .sheet .top h3{flex:1;margin:0;font-size:18px}
+.modal .sheet .top button{background:none;border:0;font-size:24px}
+.toast{position:fixed;bottom:calc(80px + var(--safe-b));left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;z-index:60;font-size:14px;max-width:90%;text-align:center}
+.spinner{width:40px;height:40px;border:4px solid #e6ddd2;border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;margin:20px auto}
+@keyframes sp{to{transform:rotate(360deg)}}
+.empty{text-align:center;color:var(--muted);padding:30px 10px}
+.empty b{display:block;font-size:42px;margin-bottom:8px}
+.cat-item{display:flex;gap:10px;align-items:center}
+.cat-item img{width:56px;height:56px;border-radius:10px;object-fit:cover;background:#eee}
+.pick{border:2px solid transparent}
+.pick.on{border-color:var(--accent);background:#fbf3ec}
+.badge{display:inline-block;font-size:11px;background:#ece5dc;border-radius:8px;padding:2px 7px;margin-inline-start:4px}
+.note-ic{font-size:13px;color:var(--accent);cursor:pointer}
+#print{display:none}
+@media print{
+  header,nav.tabs,main,.modal,.toast{display:none!important}
+  #print{display:block}
+  body{background:#fff}
+  .pp{page-break-after:always;padding:10px}
+  .pp img{max-width:100%;max-height:420px;display:block;margin:6px 0}
+  .pp table{width:100%;border-collapse:collapse;font-size:13px}
+  .pp td,.pp th{border:1px solid #ccc;padding:5px;text-align:right}
+}
+</style>
+</head>
+<body>
+<header>
+  <button id="backBtn" aria-label="חזרה" style="display:none">→</button>
+  <h1 id="title">מעצב חכם</h1>
+  <button id="helpBtn" aria-label="עזרה">?</button>
+</header>
+<main id="app"></main>
+<nav class="tabs" id="tabs">
+  <button data-tab="projects" class="on"><b>📁</b>פרויקטים</button>
+  <button data-tab="catalog"><b>🧱</b>קטלוג</button>
+  <button data-tab="rules"><b>📏</b>כללים</button>
+  <button data-tab="settings"><b>⚙️</b>הגדרות</button>
+</nav>
+<div id="print"></div>
+<script src="rules.js"></script>
+<script src="app.js"></script>
+<script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+</script>
+</body>
+</html>
