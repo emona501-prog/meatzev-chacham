@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.1';
+const APP_VERSION = '0.7.2';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -477,7 +477,7 @@ function studio(p, r, fromDesign) {
       if (!itemsEl) return; itemsEl.innerHTML = '';
       for (const it of S.catalog.filter(x => x.cat === cat)) {
         const d = document.createElement('div'); d.className = 't' + (sel.items.has(it.id) ? ' sel' : '');
-        d.innerHTML = `<img loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:11px;padding:12px 5px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}</div>`;
+        d.innerHTML = `<img loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:11px;padding:12px 5px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}${it.model ? `<br><span dir="ltr" style="opacity:.85">${esc(it.model)}</span>` : ''}</div>`;
         getImg(it.img).then(async src => { d.querySelector('img').src = src || await Sync.fetchImg(it.img) || 'icon.svg'; });
         d.onclick = () => { sel.items.has(it.id) ? sel.items.delete(it.id) : sel.items.add(it.id); d.classList.toggle('sel'); selCount(); };
         itemsEl.appendChild(d);
@@ -673,7 +673,7 @@ The prompt you write MUST:
 Room type: ${c.name}. Real size: ${r.L ? `${r.L} x ${r.W} cm, ceiling ${r.H || '?'} cm` : 'unknown'}.
 Style: ${sel.style || 'not specified — keep the existing style unless the request implies otherwise'}.
 Products / elements to use (attached as reference images in this order; image 1 is the room). You can SEE these reference images below — for each one, describe it in the prompt precisely: material, exact color, finish (matte/gloss), pattern, texture, tile/plank size and layout, legs/frame, fabric — so Gemini reproduces it exactly:
-${items.length ? items.map((it, i) => `${i + 2}. ${it.name} (${it.cat}${it.dims ? ', ' + it.dims : ''}${it.color ? ', ' + it.color : ''}${it.supplier ? ', supplier ' + it.supplier : ''}${it.note ? ', designer note: ' + it.note : ''}${it.photo ? ', photo taken by the designer' : ''})`).join('\n') : 'none'}
+${items.length ? items.map((it, i) => `${i + 2}. ${it.name} (${it.cat}${it.model ? ', model ' + it.model : ''}${it.dims ? ', ' + it.dims : ''}${it.color ? ', ' + it.color : ''}${it.supplier ? ', supplier ' + it.supplier : ''}${it.note ? ', designer note: ' + it.note : ''}${it.photo ? ', photo taken by the designer' : ''})`).join('\n') : 'none'}
 Professional rules from her course (red = forbidden, orange = needs checking, green = recommendation):
 ${rules}
 
@@ -703,7 +703,7 @@ function localPrompt(r, sel, ins, refs) {
     `Room: ${c.name}${r.L ? `, real size ${r.L}x${r.W} cm${r.H ? `, ceiling ${r.H} cm` : ''}` : ''}.`,
     sel.style ? `Style: ${sel.style}.` : '',
     ins ? `Requested changes (in Hebrew): ${ins}` : '',
-    ...refs.map((x, i) => `Image ${i + 2} is a real product/material: ${x.item.name} (${x.item.cat})${x.item.note ? ' — ' + x.item.note : ''}. Copy it exactly as it looks in the photo: same material, color, finish, pattern and proportions.`),
+    ...refs.map((x, i) => `Image ${i + 2} is a real product/material: ${x.item.name} (${x.item.cat}${x.item.model ? ', model ' + x.item.model : ''}${x.item.color ? ', ' + x.item.color : ''})${x.item.note ? ' — ' + x.item.note : ''}. Copy it exactly as it looks in the photo: same material, color, finish, pattern and proportions.`),
     'Use realistic real-world scale and proportions. Photorealistic interior photography, natural lighting matching the original photo, realistic shadows and reflections, high detail.'
   ].filter(Boolean);
   return { prompt: lines.join('\n'), prompt_he: '', observations_he: [], warnings_he: [], tips_he: ['זו הנחיה בסיסית שנבנתה בלי AI. כשהשרתים פנויים, ההנחיה המקצועית מנתחת גם את התמונה ובודקת מול הכללים.'] };
@@ -951,11 +951,69 @@ async function renderCatalog(app) {
   const cl = $('#clist');
   for (const it of list) {
     const d = document.createElement('div'); d.className = 't';
-    d.innerHTML = `<img loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:11px;padding:14px 5px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}</div>`;
+    d.innerHTML = `<img loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:11px;padding:14px 5px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}${it.model ? `<br><span dir="ltr" style="opacity:.85">${esc(it.model)}</span>` : ''}</div>`;
     cl.appendChild(d);
     d.onclick = () => itemForm(it);
     getImg(it.img).then(src => { d.querySelector('img').src = src || 'icon.svg'; if (!src && it.img) Sync.fetchImg(it.img).then(s2 => { if (s2) d.querySelector('img').src = s2; }); });
   }
+}
+
+// =====================================================================
+// זיהוי כפילויות — "טביעת אצבע" של תמונה (dHash 64 ביט). תמונה זהה או כמעט זהה (גם אם הוקטנה/נדחסה) תיתן טביעה קרובה
+async function imgHash(dataURL) {
+  try {
+    const im = await loadImg(dataURL);
+    const c = document.createElement('canvas'); c.width = 9; c.height = 8;
+    const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(im, 0, 0, 9, 8);
+    const d = x.getImageData(0, 0, 9, 8).data; let h = '';
+    for (let y = 0; y < 8; y++) for (let i = 0; i < 8; i++) {
+      const a = (y * 9 + i) * 4, b = a + 4;
+      h += (d[a] * .3 + d[a + 1] * .59 + d[a + 2] * .11) > (d[b] * .3 + d[b + 1] * .59 + d[b + 2] * .11) ? '1' : '0';
+    }
+    return h;
+  } catch { return ''; }
+}
+const hashDist = (a, b) => { if (!a || !b || a.length !== b.length) return 99; let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; };
+// משלים טביעות לפריטים ישנים שאין להם (פעם אחת)
+async function ensureHashes() {
+  for (const it of S.catalog) {
+    if (it.ph || !it.img) continue;
+    const d = await getImg(it.img); if (d) it.ph = await imgHash(d);
+  }
+}
+async function findDuplicate(hash, exceptId) {
+  if (!hash) return null;
+  await ensureHashes();
+  let best = null, bd = 99;
+  for (const it of S.catalog) { if (it.id === exceptId) continue; const d = hashDist(hash, it.ph); if (d < bd) { bd = d; best = it; } }
+  return bd <= 6 ? best : null;
+}
+
+// =====================================================================
+// זיהוי מוצר בעזרת AI — שם, קטגוריה, דגם, צבע, מידות וכו' מתוך התמונה
+async function aiIdentify(dataURL, onStatus) {
+  if (!S.settings.apiKey) throw new Error('צריך מפתח AI בהגדרות.');
+  const small = await shrinkData(dataURL, 1024, 0.85);
+  const [h, b64] = small.split(',');
+  const cats = R().catCats;
+  const sys = `You are an expert interior-design materials and products cataloguer for the Israeli market.
+Identify the product/material in the photo. It may be a shop shelf, a sample board, a catalog page, a box label or a product photo.
+Return ONLY JSON with these keys (Hebrew values except where noted):
+{"name": short descriptive Hebrew product name (e.g. "גרניט פורצלן דמוי שיש קלקטה מבריק"),
+ "category": EXACTLY one of: ${JSON.stringify(cats)},
+ "model": model / series / SKU code exactly as printed in the photo (keep original Latin letters and digits), or "" if no code is visible,
+ "brand": brand or supplier name if printed/visible, else "",
+ "dims": size if printed or clearly standard (e.g. "60×120 ס\\"מ"), else "",
+ "color": color and finish in Hebrew (e.g. "לבן מבריק", "אלון טבעי מט"),
+ "material": material in Hebrew,
+ "price": price if a price tag is visible, else "",
+ "note": one short Hebrew sentence describing look/texture/style useful for an AI image prompt,
+ "confidence": "high" | "medium" | "low"}
+CRITICAL: never invent a model number, brand or price. Only copy them if they are actually readable in the photo. Read every label/sticker/text carefully.`;
+  const txt = await geminiText([{ text: sys }, { inline_data: { mime_type: h.match(/data:(.*?);/)?.[1] || 'image/jpeg', data: b64 } }], true, onStatus);
+  let j; try { j = JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { throw new Error('ה-AI החזיר תשובה לא מובנת. נסו שוב.'); }
+  if (!cats.includes(j.category)) j.category = cats.includes('אחר') ? 'אחר' : cats[0];
+  return j;
 }
 
 async function bulkAdd(cat) {
@@ -965,24 +1023,44 @@ async function bulkAdd(cat) {
     });
   }
   const files = await pickFiles(true); if (!files.length) return;
-  let n = S.catalog.filter(x => x.cat === cat).length;
+  const useAI = !!S.settings.apiKey && confirm(`לזהות אוטומטית עם AI את שם המוצר, הדגם והפרטים של ${files.length} התמונות?\n(אישור = כן, ביטול = רק להוסיף)`);
+  let n = S.catalog.filter(x => x.cat === cat).length, added = 0, dups = [], aiFail = 0;
+  await ensureHashes();
   for (let i = 0; i < files.length; i++) {
-    toast(`מוסיף תמונה ${i + 1} מתוך ${files.length}…`, 1200);
+    toast(`מוסיף תמונה ${i + 1} מתוך ${files.length}…`, 1500);
     const data = await catalogImageData(files[i]);
-    const it = { id: uid(), name: `${cat} ${++n}`, cat, supplier: '', dims: '', color: '', price: '', link: '', note: '', img: await putImg(data), updated: Date.now() };
-    S.catalog.push(it); Sync.pushItem(it, data);
+    const ph = await imgHash(data);
+    const dup = await findDuplicate(ph);
+    if (dup) { dups.push(dup.name); continue; }
+    const it = { id: uid(), name: `${cat} ${++n}`, cat, supplier: '', model: '', dims: '', color: '', price: '', link: '', note: '', ph, updated: Date.now() };
+    if (useAI) {
+      try {
+        toast(`🤖 מזהה מוצר ${i + 1} מתוך ${files.length}…`, 20000);
+        const a = await aiIdentify(data);
+        Object.assign(it, { name: a.name || it.name, model: a.model || '', supplier: a.brand || '', dims: a.dims || '', color: a.color || '', price: a.price || '', note: [a.material, a.note].filter(Boolean).join(' · ') });
+      } catch { aiFail++; }
+    }
+    it.img = await putImg(data);
+    S.catalog.push(it); Sync.pushItem(it, data); added++;
   }
-  save(); toast(`נוספו ${files.length} תמונות ל"${cat}". אפשר ללחוץ על תמונה ולהוסיף שם ופרטים.`, 3500); render();
+  save(); render();
+  const msg = [`נוספו ${added} תמונות ל"${cat}".`];
+  if (dups.length) msg.push(`${dups.length} דולגו כי כבר קיימות בקטלוג (${dups.slice(0, 3).join(', ')}${dups.length > 3 ? '…' : ''}).`);
+  if (aiFail) msg.push(`ב-${aiFail} הזיהוי האוטומטי לא הצליח — אפשר לפתוח ולנסות שוב.`);
+  if (dups.length || aiFail) alert(msg.join('\n')); else toast(msg[0], 3000);
 }
 
 function itemForm(it, defCat) {
   let newImg = null;
   modal(it ? 'עריכת מוצר' : 'מוצר חדש', `
     <div id="imgBox" style="text-align:center"><img id="ip" style="max-width:100%;max-height:240px;border-radius:12px;display:none">
-      <button class="btn sec full" id="pickI" style="margin-top:8px">📷 ${it ? 'החלפת תמונה' : 'תמונת המוצר'}</button></div>
+      <button class="btn sec full" id="pickI" style="margin-top:8px">📷 ${it ? 'החלפת תמונה' : 'תמונת המוצר'}</button>
+      <button class="btn full" id="aiId" style="margin-top:8px;${it?.img ? '' : 'display:none'}">🤖 זיהוי אוטומטי מהתמונה</button>
+      <div id="aiMsg" class="muted" style="margin-top:6px"></div></div>
     <label>שם המוצר</label><input id="in" value="${esc(it?.name || '')}" placeholder="למשל: גרניט פורצלן דמוי בטון 60×120">
     <label>קטגוריה</label><select id="ic">${R().catCats.map(c => `<option ${(it?.cat || defCat) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-    <label>ספק / חנות</label><input id="is" value="${esc(it?.supplier || '')}">
+    <div class="grid2"><div><label>מספר דגם / מק"ט</label><input id="im" value="${esc(it?.model || '')}" dir="ltr" placeholder="CAL-60120"></div>
+      <div><label>ספק / מותג</label><input id="is" value="${esc(it?.supplier || '')}"></div></div>
     <div class="grid2"><div><label>מידות</label><input id="id" value="${esc(it?.dims || '')}" placeholder="60×120 ס&quot;מ"></div>
       <div><label>צבע / גימור</label><input id="ico" value="${esc(it?.color || '')}" placeholder="אפור מט"></div></div>
     <div class="grid2"><div><label>מחיר</label><input id="ipr" value="${esc(it?.price || '')}" placeholder='120 ₪ למ"ר'></div>
@@ -992,11 +1070,31 @@ function itemForm(it, defCat) {
     ${it ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקת המוצר</button>' : ''}`, async (b, close) => {
     const ip = $('#ip', b);
     if (it?.img) { ip.src = await getImg(it.img) || await Sync.fetchImg(it.img) || ''; ip.style.display = ip.src ? '' : 'none'; }
-    $('#pickI', b).onclick = async () => { const [f] = await pickPhoto(); if (!f) return; newImg = await catalogImageData(f); ip.src = newImg; ip.style.display = ''; };
+    let newHash = '';
+    $('#pickI', b).onclick = async () => {
+      const [f] = await pickPhoto(); if (!f) return;
+      const data = await catalogImageData(f); const h = await imgHash(data);
+      const dup = await findDuplicate(h, it?.id);
+      if (dup && !confirm(`התמונה הזו כבר קיימת בקטלוג:\n"${dup.name}"${dup.model ? ' · ' + dup.model : ''} (${dup.cat})\n\nלהשתמש בה בכל זאת?`)) return;
+      newImg = data; newHash = h; ip.src = newImg; ip.style.display = ''; $('#aiId', b).style.display = '';
+    };
+    $('#aiId', b).onclick = async () => {
+      const src = newImg || ip.src; if (!src) return toast('קודם בוחרים תמונה');
+      const btn = $('#aiId', b), msg = $('#aiMsg', b); btn.disabled = true; msg.textContent = '🤖 מזהה…';
+      try {
+        const a = await aiIdentify(src, (m) => msg.textContent = m);
+        const set = (id, v) => { if (v) $(id, b).value = v; };
+        set('#in', a.name); set('#im', a.model); set('#is', a.brand); set('#id', a.dims); set('#ico', a.color); set('#ipr', a.price);
+        if (a.category) $('#ic', b).value = a.category;
+        const note = [a.material, a.note].filter(Boolean).join(' · '); if (note && !$('#ino', b).value.trim()) $('#ino', b).value = note;
+        msg.innerHTML = `✓ זוהה (${a.confidence === 'high' ? 'ביטחון גבוה' : a.confidence === 'low' ? 'ביטחון נמוך — כדאי לבדוק' : 'ביטחון בינוני'}). ${a.model ? '' : 'לא נמצא מספר דגם כתוב בתמונה — אפשר לצלם את המדבקה/התווית ולנסות שוב.'} בודקים ומתקנים לפני שמירה.`;
+      } catch (e) { msg.textContent = e.message; }
+      btn.disabled = false;
+    };
     $('#ok', b).onclick = async () => {
       const name = $('#in', b).value.trim(); if (!name) return toast('צריך שם למוצר');
-      const d = { name, cat: $('#ic', b).value, supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
-      if (newImg) { d.img = await putImg(newImg); }
+      const d = { name, cat: $('#ic', b).value, model: $('#im', b).value.trim(), supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
+      if (newImg) { d.img = await putImg(newImg); d.ph = newHash || await imgHash(newImg); }
       let target = it;
       if (it) Object.assign(it, d); else { target = { id: uid(), ...d }; S.catalog.push(target); }
       Sync.pushItem(target, newImg);
