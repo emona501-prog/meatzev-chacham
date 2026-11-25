@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.6';
+const APP_VERSION = '0.7.7';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -891,16 +891,23 @@ async function catalogImageData(file) {
 function catForm(old) {
   const n = old ? S.catalog.filter(x => x.cat === old).length : 0;
   modal(old ? 'עריכת קטגוריה' : 'קטגוריה חדשה', `
-    <label>שם הקטגוריה</label><input id="cn" value="${esc(old || '')}" placeholder="לדוגמה: קירות">
+    <label>${old ? 'שם הקטגוריה' : 'שם הקטגוריה — או הרבה קטגוריות במכה אחת'}</label>
+    ${old ? `<input id="cn" value="${esc(old)}">` : `<textarea id="cn" rows="3" placeholder="לדוגמה: קירות&#10;או כמה ביחד: נרות, פמוטים, מגשים, פסלים"></textarea>
+      <div class="muted" style="font-size:12px">אפשר להפריד בשורות, בפסיקים או בלוכסנים (/) — הכל יתפרק לבד לקטגוריות נפרדות.</div>`}
     <div class="row" style="margin-top:14px;gap:8px">
       <button class="btn grow" id="cSave">${old ? 'שמירה' : '+ הוספה'}</button>
       ${old ? `<button class="btn sec" id="cDel" style="color:#b3261e">🗑 מחיקה</button>` : ''}</div>
     ${old && n ? `<div class="muted" style="margin-top:8px">יש בקטגוריה ${n} מוצרים. במחיקה הם יעברו ל"אחר".</div>` : ''}`, (b, close) => {
     const inp = b.querySelector('#cn'); setTimeout(() => inp.focus(), 50);
     b.querySelector('#cSave').onclick = () => {
-      const name = inp.value.trim();
+      const names = splitList([inp.value]); const name = names[0];
       if (!name) return toast('צריך לכתוב שם');
       const C = editableRules();
+      if (!old && names.length > 1) {
+        const add = names.filter(n => !C.catCats.includes(n)); const i = C.catCats.indexOf('אחר');
+        if (i >= 0) C.catCats.splice(i, 0, ...add); else C.catCats.push(...add);
+        rulesChanged(); close(); toast(`נוספו ${add.length} קטגוריות`); return go({ catFilter: '' });
+      }
       if (name !== old && C.catCats.includes(name)) return toast('כבר יש קטגוריה בשם הזה');
       if (old) {
         C.catCats = C.catCats.map(c => c === old ? name : c);
@@ -1329,7 +1336,7 @@ const Sync = {
   async syncRules() {
     const d = await this.req('/meta/rules');
     const rUpd = +(d?.fields?.updated?.integerValue || 0), lUpd = S.custom?.updated || 0;
-    if (d && rUpd > lUpd) { S.custom = JSON.parse(d.fields.data.stringValue); save(); return true; }
+    if (d && rUpd > lUpd) { S.custom = JSON.parse(d.fields.data.stringValue); save(); fixLists(); return true; }
     if (S.custom && lUpd > rUpd) await this.pushRules();
     return false;
   },
@@ -1542,10 +1549,10 @@ function renderSettings(app) {
     };
   }
   $('#saveLists').onclick = () => {
-    const lines = (id) => $(id).value.split('\n').map(x => x.trim()).filter(Boolean);
+    const lines = (id) => splitList($(id).value.split('\n'));
     const cats = lines('#lcats'), sty = lines('#lsty');
     if (!cats.length) return toast('צריך לפחות קטגוריה אחת');
-    const C = editableRules(); C.catCats = [...new Set(cats)]; C.styles = [...new Set(sty)]; rulesChanged(); toast('הרשימות נשמרו');
+    const C = editableRules(); C.catCats = cats; C.styles = sty; rulesChanged(); toast(`הרשימות נשמרו · ${cats.length} קטגוריות`); render();
   };
   $('#exp').onclick = () => exportBackup(S.projects, true);
   $('#imp').onclick = importBackup;
@@ -1677,7 +1684,7 @@ function showHelp() {
   } catch (e) { toast('שגיאה בפתיחת האחסון: ' + e.message, 5000); }
   const jq = new URLSearchParams(location.search).get('join');
   if (jq) { history.replaceState(null, '', location.pathname); if (!Sync.ok() || confirm('להצטרף למאגר המשותף החדש?')) Sync.join(jq); }
-  migrateRules();
+  migrateRules(); fixLists();
   render();
   playIntro(false);
   Sync.run(false);
@@ -1685,6 +1692,27 @@ function showHelp() {
 })();
 
 // כשנוספים כללים חדשים לקובץ rules.js — מוסיפים אותם גם לכללים שנערכו, בלי למחוק עריכות
+// פירוק רשימה: אפשר להדביק הרבה קטגוריות במכה אחת — בשורות, בפסיקים, או עם "/" ביניהן.
+// "צבע / טיח" (לוכסן אחד) נשאר קטגוריה אחת; 2 לוכסנים ומעלה או פסיקים = רשימה.
+function splitList(arr) {
+  const out = [];
+  for (const raw of arr) {
+    const e = String(raw || '').trim(); if (!e) continue;
+    const parts = ((e.match(/\//g) || []).length >= 2 || /[,،;|\n]/.test(e)) ? e.split(/[\/,،;|\n]+/) : [e];
+    for (const p of parts) { const t = p.trim().replace(/^[-–•*·]+\s*/, ''); if (t && !out.includes(t)) out.push(t); }
+  }
+  return out;
+}
+function fixLists() {
+  const C = S.custom; if (!C) return;
+  let ch = false;
+  for (const key of ['catCats', 'styles']) {
+    if (!Array.isArray(C[key])) continue;
+    const f = splitList(C[key]);
+    if (JSON.stringify(f) !== JSON.stringify(C[key])) { C[key] = f; ch = true; }
+  }
+  if (ch) { const o = C.catCats.indexOf('אחר'); if (o >= 0 && o !== C.catCats.length - 1) { C.catCats.splice(o, 1); C.catCats.push('אחר'); } rulesChanged(); }
+}
 function migrateRules() {
   const C = S.custom; if (!C || (C.base || 1) >= (window.RULES_VERSION || 1)) return;
   for (const [k, list] of Object.entries(FIXED_RULES)) {
