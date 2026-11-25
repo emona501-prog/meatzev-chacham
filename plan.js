@@ -10,9 +10,79 @@ const WALL_TYPES = {
   mamad:    { name: 'קיר ממ"ד', thick: 30, fill: 'url(#hMamad)', c3: 0xd6c4bc },
   unknown:  { name: 'לא מאומת', thick: 15, fill: 'url(#hUnknown)', c3: 0xe9e2d0 }
 };
+const OPENING_STYLES = {
+  door: { swing: 'רגילה (ציר)', double: 'כפולה', sliding: 'הזזה', pocket: 'כיס (נכנסת לקיר)', accordion: 'הרמוניקה', pivot: 'פיבוט (ציר מרכזי)' },
+  window: { casement: 'נפתח (כנף)', sliding: 'הזזה', fixed: 'קבוע (לא נפתח)' }
+};
+const OPENING_TIPS = {
+  double: 'דלת כפולה: הכנפיים לא חייבות להיות שוות. אפשר ששתיים, ורק אחת נפתחת.',
+  sliding: 'דלת הזזה: לא חייבת משקוף. צריך מקום על הקיר לצד הפתח, באורך הדלת, כדי שתיפתח עד הסוף.',
+  pocket: 'דלת כיס: נכנסת לתוך הקיר — צריך קיר בעובי מתאים ואורך פנוי בתוך הקיר. לא חייבת משקוף.',
+  accordion: 'דלת הרמוניקה: מסילה וצירים. רוחב כל כנף = אורך הפתח ÷ מספר הכנפיים.',
+  pivot: 'דלת פיבוט: יושבת על ציר מרכזי. מתאימה לדלת גדולה, בדרך כלל בכניסה.',
+  fixed: 'חלון קבוע: לא נפתח.'
+};
 const OPENING_DEF = {
   door:   { name: 'דלת', width: 90, height: 210, sill: 0 },
   window: { name: 'חלון', width: 120, height: 120, sill: 90 }
+};
+
+// ---------------- ספריית ריהוט וסניטריה (מידות מחוברת הקורס) ----------------
+// w = רוחב, d = עומק (ס"מ). הצד האחורי למעלה (y=0), החזית למטה (y=d). h = גובה לתלת־ממד.
+const R = (x, y, w, h, r = 0, extra = '') => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ${extra}/>`;
+const FURN = {
+  bed2:     { name: 'מיטה זוגית', cat: 'שינה', w: 160, d: 200, h: 50, c3: 0xe8e1d6,
+    svg: (w, d) => R(0, 0, w, d) + R(w * .05, d * .04, w * .4, d * .2, 4) + R(w * .55, d * .04, w * .4, d * .2, 4) + `<path d="M0,${d * .29} H${w} M0,${d * .5} L${w * .26},${d * .29} V${d * .5} Z"/>` },
+  bed1:     { name: 'מיטת יחיד', cat: 'שינה', w: 80, d: 190, h: 50, c3: 0xe8e1d6,
+    svg: (w, d) => R(0, 0, w, d) + R(w * .12, d * .08, w * .76, d * .14) + `<path d="M0,${d * .18} H${w} M0,${d * .32} Q${w * .2},${d * .22} ${w * .37},${d * .33} Q${w * .3},${d * .25} ${w * .37},${d * .18}"/>` },
+  wardrobe: { name: 'ארון בגדים', cat: 'שינה', w: 120, d: 60, h: 230, c3: 0xcdb89b,
+    svg: (w, d) => R(0, 0, w, d) + `<path d="M0,${d / 2} H${w}"/>` + Array.from({ length: Math.floor(w / 12) }, (_, i) => `<path d="M${i * 12 + 4},${d / 2 + 8} L${i * 12 + 12},${d / 2 - 8}"/>`).join('') },
+  sofa3:    { name: 'ספה תלת', cat: 'סלון', w: 240, d: 80, h: 80, c3: 0x9c8f80,
+    svg: (w, d) => R(0, 0, w, d) + R(0, 0, w, 13) + R(0, 0, 8, d) + R(w - 8, 0, 8, d) + `<path d="M${8 + (w - 16) / 3},13 V${d} M${8 + 2 * (w - 16) / 3},13 V${d}"/>` },
+  armchair: { name: 'כורסה', cat: 'סלון', w: 67, d: 55, h: 80, c3: 0x9c8f80,
+    svg: (w, d) => R(6, 0, w - 12, d) + R(6, 0, w - 12, 8) + R(0, 8, 6, d - 14) + R(w - 6, 8, 6, d - 14) },
+  armchairR:{ name: 'כורסה מעוגלת', cat: 'סלון', w: 85, d: 80, h: 78, c3: 0x9c8f80,
+    svg: (w, d) => `<path d="M3,0 H${w - 3} Q${w},0 ${w},3 V${d - 25} A25,25 0 0 1 ${w - 25},${d} H25 A25,25 0 0 1 0,${d - 25} V3 Q0,0 3,0 Z M16,8 V${d - 24} A8,8 0 0 0 24,${d - 16} H${w - 24} A8,8 0 0 0 ${w - 16},${d - 24} V8 Z"/>` },
+  pouf:     { name: 'כיסא / פוף', cat: 'סלון', w: 50, d: 53, h: 45, c3: 0xa89a89,
+    svg: (w, d) => R(0, 0, w, d - 8, 5) + R(0, d - 7, w, 7, 2) },
+  coffee:   { name: 'שולחן קפה', cat: 'סלון', w: 50, d: 80, h: 40, c3: 0x8a6d55, svg: (w, d) => R(0, 0, w, d) },
+  tvunit:   { name: 'מזנון / יחידת טלוויזיה', cat: 'סלון', w: 180, d: 45, h: 50, c3: 0x8a6d55, svg: (w, d) => R(0, 0, w, d) + `<path d="M${w / 3},0 V${d} M${2 * w / 3},0 V${d}"/>` },
+  dining6:  { name: 'שולחן אוכל + 6 כיסאות', cat: 'אוכל', w: 270, d: 100, h: 75, c3: 0x8a6d55, chairs: 6,
+    svg: (w, d) => R(0, 0, w, d) + [0, 1, 2].map(i => { const cx = 10 + 67 / 2 + i * (67 + 24.5) * (w - 20) / 250; return chairSvg(cx, 0, false) + chairSvg(cx, d, true); }).join('') },
+  dining4sq:{ name: 'שולחן מרובע + 4 כיסאות', cat: 'אוכל', w: 120, d: 120, h: 75, c3: 0x8a6d55, chairs: 4,
+    svg: (w, d) => R(0, 0, w, d) + chairSvg(w / 2, 0, false) + chairSvg(w / 2, d, true) + chairSvgSide(0, d / 2, false) + chairSvgSide(w, d / 2, true) },
+  dining4r: { name: 'שולחן עגול + 4 כיסאות', cat: 'אוכל', w: 150, d: 150, h: 75, c3: 0x8a6d55, chairs: 4, round: true,
+    svg: (w, d) => `<circle cx="${w / 2}" cy="${d / 2}" r="${w / 2}"/>` + chairSvg(w / 2, 0, false) + chairSvg(w / 2, d, true) + chairSvgSide(0, d / 2, false) + chairSvgSide(w, d / 2, true) },
+  counter:  { name: 'משטח מטבח (ארון תחתון)', cat: 'מטבח', w: 240, d: 60, h: 90, c3: 0xd9d4cc,
+    svg: (w, d) => { const n = Math.max(1, Math.round(w / 60)); return R(0, 0, w, d) + Array.from({ length: n }, (_, i) => { const x0 = i * w / n, x1 = (i + 1) * w / n; return `<path d="M${x0},0 L${x1},${d} M${x1},0 L${x0},${d}"/>`; }).join(''); } },
+  island:   { name: 'אי מטבח', cat: 'מטבח', w: 180, d: 90, h: 90, c3: 0xd9d4cc, svg: (w, d) => R(0, 0, w, d) + `<path d="M0,60 H${w}" stroke-dasharray="4 3"/>` },
+  fridge:   { name: 'מקרר', cat: 'מטבח', w: 70, d: 70, h: 185, c3: 0xdedede, svg: (w, d) => R(0, 0, w, d) + `<path d="M0,0 L${w},${d} M${w},0 L0,${d}"/>` + `<text x="${w / 2}" y="${d / 2 + 4}" font-size="11" text-anchor="middle" stroke="none" fill="#2f2a26">מקרר</text>` },
+  sinkR:    { name: 'כיור עגול', cat: 'רחצה', w: 35, d: 35, h: 85, c3: 0xf4f4f2, round: true,
+    svg: (w, d) => `<circle cx="${w / 2}" cy="${d / 2}" r="${w / 2}"/><circle cx="${w / 2}" cy="${d / 2}" r="${w / 2 - 3}"/><circle cx="${w / 2}" cy="${d / 2}" r="2"/>` },
+  sinkRect: { name: 'כיור מלבני', cat: 'רחצה', w: 60, d: 40, h: 85, c3: 0xf4f4f2,
+    svg: (w, d) => R(0, 0, w, d, 8) + R(w / 2 - 3, -2, 6, 12) + `<circle cx="${w / 2}" cy="${d * .55}" r="2.5"/>` },
+  shower:   { name: 'מגש מקלחת', cat: 'רחצה', w: 80, d: 80, h: 5, c3: 0xf4f4f2,
+    svg: (w, d) => R(0, 0, w, d) + R(5, 5, w - 10, d - 10, 10) + `<circle cx="${w * .2}" cy="${d * .8}" r="2.5"/><path d="M${w * .28},${d * .72} L${w * .5},${d * .5}"/>` },
+  bath:     { name: 'אמבטיה', cat: 'רחצה', w: 180, d: 60, h: 55, c3: 0xf4f4f2,
+    svg: (w, d) => R(0, 0, w, d) + R(6, 6, w - 12, d - 12, 22) + `<circle cx="${w - 22}" cy="${d / 2}" r="2.5"/>` },
+  toilet:   { name: 'אסלה', cat: 'רחצה', w: 40, d: 60, h: 40, c3: 0xf4f4f2,
+    svg: (w, d) => R(0, 0, w, 5) + `<path d="M3,5 V${d - 22} A${w / 2 - 3},22 0 0 0 ${w - 3},${d - 22} V5"/><ellipse cx="${w / 2}" cy="${d * .45}" rx="${w / 2 - 7}" ry="${d * .27}"/>` }
+};
+function chairSvg(cx, y, front) { // כיסא עם משענת, מתחת לשולחן בקו מקווקו
+  const cw = 50, cd = 45, dir = front ? 1 : -1, y0 = front ? y - 18 : y - cd + 18;
+  return `<g stroke-dasharray="3 2">${R(cx - cw / 2, y0, cw, cd, 3)}</g>` + R(cx - cw / 2, front ? y0 + cd : y0 - 7, cw, 7);
+}
+function chairSvgSide(x, cy, right) {
+  const cw = 45, cd = 50, x0 = right ? x - 18 : x - cw + 18;
+  return `<g stroke-dasharray="3 2">${R(x0, cy - cd / 2, cw, cd, 3)}</g>` + R(right ? x0 + cw : x0 - 7, cy - cd / 2, 7, cd);
+}
+// כללי מרווח לריהוט (מהקורס)
+const FURN_RULES = {
+  bed2: { sides: [['ימין', 60], ['שמאל', 60]], front: 80, msg: 'בין מיטה לקיר 60–70 ס"מ; מול המיטה כ-80 ס"מ.' },
+  bed1: { sides: [['צד', 60]], anySide: true, front: 80, msg: 'מיטת יחיד יכולה להיצמד לקיר מצד אחד; בצד הפתוח 60 ס"מ, מול המיטה 80.' },
+  dining6: { all: 90, msg: '90 ס"מ בין השולחן לקיר.' }, dining4sq: { all: 90, msg: '90 ס"מ בין השולחן לקיר (גם מהפינות).' },
+  dining4r: { all: 90, msg: '90 ס"מ בין השולחן לקיר.' }, island: { all: 90, maxAll: 120, msg: 'מרווח סביב אי 90–120 ס"מ.' },
+  wardrobe: { front: 60, msg: 'צריך מקום לפתיחת דלתות הארון מלפנים.' }
 };
 
 const P = {
@@ -23,6 +93,7 @@ const P = {
 
 function ensurePlan(p) {
   if (!p.plan) p.plan = { walls: [], openings: [], height: 280, bg: null, original: null };
+  if (!p.plan.furniture) p.plan.furniture = [];
   return p.plan;
 }
 const cur = () => (P.showOriginal && P.plan.original) ? P.plan.original : P.plan;
@@ -56,7 +127,8 @@ function alertBox(r) {
 }
 function openingIssues(o, w) {
   const out = [];
-  if (o.kind === 'door' && o.width < 90) out.push({ level: 'orange', msg: 'רוחב דלת מינימלי 90 ס"מ (אפשר להגדיל, לא להקטין).' });
+  if (o.kind === 'door' && o.width < 70) out.push({ level: 'red', msg: 'פתח דלת צר מ-70 ס"מ — קטן מהמינימום לכל חדר.' });
+  else if (o.kind === 'door' && o.width < 90) out.push({ level: 'green', msg: 'מינימום פתח: כניסה 90, חדרי שינה וחדרים 80, שירותים/אמבטיה 70. גובה דלת 210.' });
   const L = len(w);
   if (o.pos - o.width / 2 < 0 || o.pos + o.width / 2 > L) out.push({ level: 'red', msg: 'הפתח יוצא מגבולות הקיר.' });
   for (const x of P.plan.openings) if (x !== o && x.wallId === o.wallId && Math.abs(x.pos - o.pos) < (x.width + o.width) / 2) out.push({ level: 'orange', msg: 'הפתח חופף לפתח אחר באותו קיר.' });
@@ -121,22 +193,36 @@ function planSVG(pl, opts = {}) {
     const isNew = orig && !origIds.has(o.id);
     const col = isSel ? '#a86b4a' : isNew ? '#2e8b57' : '#2f2a26';
     parts.push(`<polygon points="${a.x + nx * 1.05},${a.y + ny * 1.05} ${b.x + nx * 1.05},${b.y + ny * 1.05} ${b.x - nx * 1.05},${b.y - ny * 1.05} ${a.x - nx * 1.05},${a.y - ny * 1.05}" fill="#fff" stroke="none"/>`);
+    const st = o.style || (o.kind === 'door' ? 'swing' : 'casement');
+    const sw = 1 / s, ln = (x1, y1, x2, y2, w = 1.5, dash = '') => parts.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${col}" stroke-width="${w * sw}" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`);
+    const arc = (hx, hy, r, tx, ty, ex, ey, sweep) => parts.push(`<path d="M${tx},${ty} A${r},${r} 0 0,${sweep} ${ex},${ey}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-dasharray="${4 * sw} ${3 * sw}"/>`);
+    const leaf = (hx, hy, ux, uy, W, flipSide) => { // כנף על ציר בנקודה h, נפתחת לכיוון u לאורך W
+      const f = flipSide ? -1 : 1, px = -a.uy * f, py = a.ux * f;
+      const bx = hx + px * w.thick / 2, by = hy + py * w.thick / 2, tx = bx + px * W, ty = by + py * W, ex = bx + ux * W, ey = by + uy * W;
+      ln(bx, by, tx, ty, 2); arc(bx, by, W, tx, ty, ex, ey, (px * uy - py * ux) > 0 ? 1 : 0);
+    };
     if (o.kind === 'door') {
-      const flip = o.flip ? -1 : 1, px = -a.uy * flip, py = a.ux * flip;
-      const hx = a.x + px * w.thick / 2, hy = a.y + py * w.thick / 2;
-      const tipx = hx + px * o.width, tipy = hy + py * o.width;
-      const ex = hx + a.ux * o.width, ey = hy + a.uy * o.width;
-      parts.push(`<line x1="${hx}" y1="${hy}" x2="${tipx}" y2="${tipy}" stroke="${col}" stroke-width="${2 / s}"/>`);
-      const sweep = (px * a.uy - py * a.ux) > 0 ? 1 : 0;
-      parts.push(`<path d="M${tipx},${tipy} A${o.width},${o.width} 0 0,${sweep} ${ex},${ey}" fill="none" stroke="${col}" stroke-width="${1 / s}" stroke-dasharray="${4 / s} ${3 / s}"/>`);
+      if (st === 'double') { leaf(a.x, a.y, a.ux, a.uy, o.width / 2, o.flip); leaf(b.x, b.y, -a.ux, -a.uy, o.width / 2, o.flip); }
+      else if (st === 'sliding') { const off = w.thick / 2 + 4; const f = o.flip ? -1 : 1; ln(a.x - a.uy * off * f, a.y + a.ux * off * f, b.x + a.ux * o.width * 0.9 - a.uy * off * f, b.y + a.uy * o.width * 0.9 + a.ux * off * f, 3); ln(a.x, a.y, b.x, b.y, 1, `${4 * sw} ${3 * sw}`); }
+      else if (st === 'pocket') { ln(a.x, a.y, b.x, b.y, 3); ln(b.x, b.y, b.x + a.ux * o.width, b.y + a.uy * o.width, 1.5, `${4 * sw} ${3 * sw}`); }
+      else if (st === 'accordion') { const n = Math.max(2, Math.round(o.width / 25)), seg = o.width / n, f = o.flip ? -1 : 1; let pts = []; for (let i = 0; i <= n; i++) { const d = i * seg, z = (i % 2 ? 1 : 0) * seg * 0.6 * f; pts.push(`${a.x + a.ux * d - a.uy * (w.thick / 2 + z) * f},${a.y + a.uy * d + a.ux * (w.thick / 2 + z) * f}`); } parts.push(`<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="${1.5 * sw}"/>`); }
+      else if (st === 'pivot') { const c = along(w, o.pos - o.width / 2 + o.width * 0.15), L2 = o.width * 0.85, ang = Math.PI / 3 * (o.flip ? -1 : 1), cs = Math.cos(ang), sn = Math.sin(ang); const dx = a.ux * cs - a.uy * sn, dy = a.ux * sn + a.uy * cs; ln(c.x - dx * o.width * 0.15, c.y - dy * o.width * 0.15, c.x + dx * L2, c.y + dy * L2, 3); parts.push(`<circle cx="${c.x}" cy="${c.y}" r="${3 * sw}" fill="${col}"/>`); }
+      else leaf(a.x, a.y, a.ux, a.uy, o.width, o.flip);
     } else {
-      for (const k of [-0.5, 0, 0.5]) parts.push(`<line x1="${a.x + nx * k * 2 * 0.9}" y1="${a.y + ny * k * 2 * 0.9}" x2="${b.x + nx * k * 2 * 0.9}" y2="${b.y + ny * k * 2 * 0.9}" stroke="${col}" stroke-width="${(k === 0 ? 1 : 1.5) / s}"/>`);
+      if (st === 'fixed') { ln(a.x, a.y, b.x, b.y, 1.5); ln(a.x + nx * .9, a.y + ny * .9, b.x + nx * .9, b.y + ny * .9, 1); ln(a.x - nx * .9, a.y - ny * .9, b.x - nx * .9, b.y - ny * .9, 1); }
+      else if (st === 'sliding') { const m = along(w, o.pos); ln(a.x + nx * .3, a.y + ny * .3, m.x + a.ux * 5 + nx * .3, m.y + a.uy * 5 + ny * .3, 2.5); ln(m.x - a.ux * 5 - nx * .3, m.y - a.uy * 5 - ny * .3, b.x - nx * .3, b.y - ny * .3, 2.5); ln(a.x + nx * .9, a.y + ny * .9, b.x + nx * .9, b.y + ny * .9, 1); ln(a.x - nx * .9, a.y - ny * .9, b.x - nx * .9, b.y - ny * .9, 1); }
+      else for (const k of [-0.5, 0, 0.5]) ln(a.x + nx * k * 1.8, a.y + ny * k * 1.8, b.x + nx * k * 1.8, b.y + ny * k * 1.8, k === 0 ? 1 : 1.5);
     }
   }
   if (orig) for (const o of orig.openings) if (!curIds.has(o.id)) {
     const w = orig.walls.find(x => x.id === o.wallId); if (!w) continue;
     const a = along(w, o.pos - o.width / 2), b = along(w, o.pos + o.width / 2);
     parts.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#c0392b" stroke-width="${4 / s}" stroke-dasharray="${6 / s} ${4 / s}"/>`);
+  }
+  for (const f of (pl.furniture || [])) {
+    const def = FURN[f.type]; if (!def) continue;
+    const isSel = P.sel?.kind === 'furn' && P.sel.id === f.id && !opts.forPrint;
+    parts.push(`<g transform="translate(${f.x},${f.y}) rotate(${f.rot || 0}) translate(${-f.w / 2},${-f.d / 2})" fill="${isSel ? '#fbe9dc' : '#fff'}" fill-opacity="${isSel ? 1 : .85}" stroke="${isSel ? '#a86b4a' : '#4a433d'}" stroke-width="${(isSel ? 2.5 : 1) / s}" vector-effect="non-scaling-stroke">${def.svg(f.w, f.d)}</g>`);
   }
   if (opts.dims !== false) for (const w of pl.walls) {
     const L = len(w); if (L < 20) continue;
@@ -183,7 +269,7 @@ function open(app, p) {
     <div class="card" style="padding:10px">
       <div class="chips" id="tools">
         <span class="chip" data-t="select">👆 בחירה</span><span class="chip" data-t="pan">✋ הזזה</span>
-        <span class="chip" data-t="wall">🧱 קיר</span><span class="chip" data-t="door">🚪 דלת</span><span class="chip" data-t="window">🪟 חלון</span>
+        <span class="chip" data-t="wall">🧱 קיר</span><span class="chip" data-t="door">🚪 דלת</span><span class="chip" data-t="window">🪟 חלון</span><span class="chip" data-t="furn">🛋️ ריהוט</span>
       </div>
       <div class="row" style="margin-top:8px"><span class="muted">סוג קיר חדש:</span>
         <select id="wtSel" class="grow" style="padding:7px 10px;flex:1">${Object.entries(WALL_TYPES).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('')}</select></div>
@@ -223,7 +309,7 @@ function open(app, p) {
   $('#bOrig').onclick = () => {
     if (!P.plan.walls.length) return toast('קודם משרטטים את הבית');
     if (P.plan.original && !confirm('לעדכן את "מצב קיים" לתוכנית הנוכחית? המצב הקודם יוחלף.')) return;
-    P.plan.original = clone({ walls: P.plan.walls, openings: P.plan.openings }); P.showOriginal = false; changed(); toast('נשמר כ"מצב קיים". מכאן כל שינוי נחשב "אחרי".', 3500); rerender();
+    P.plan.original = clone({ walls: P.plan.walls, openings: P.plan.openings, furniture: P.plan.furniture || [] }); P.showOriginal = false; changed(); toast('נשמר כ"מצב קיים". מכאן כל שינוי נחשב "אחרי".', 3500); rerender();
   };
   if ($('#baBtn')) $('#baBtn').onclick = () => { P.showOriginal = !P.showOriginal; P.sel = null; rerender(); };
   if ($('#diffOn')) $('#diffOn').onchange = (e) => { P.diffOn = e.target.checked; draw(); };
@@ -236,8 +322,9 @@ function rerender() { open($('#app'), P.p); }
 function changed() { P.p.updated = Date.now(); save(); }
 
 function setTool(t) {
-  if (P.showOriginal && ['wall', 'door', 'window'].includes(t)) { toast('במצב "לפני" אי אפשר לערוך. עוברים ל"אחרי".'); t = 'select'; }
+  if (P.showOriginal && ['wall', 'door', 'window', 'furn'].includes(t)) { toast('במצב "לפני" אי אפשר לערוך. עוברים ל"אחרי".'); t = 'select'; }
   P.tool = t; P.chain = null; P.cursor = null;
+  if (t === 'furn' && !P.furnType) setTimeout(furnPicker, 50);
   document.querySelectorAll('#tools .chip').forEach(c => c.classList.toggle('on', c.dataset.t === t));
   $('#wtSel').value = P.wallType;
   $('#chainBar').style.display = 'none';
@@ -247,13 +334,14 @@ function setTool(t) {
     wall: 'נוגעים בנקודת ההתחלה, ואז בנקודת הסוף (אפשר לגרור כדי לכוון). הקיר הבא ממשיך מאותה נקודה. מידות נצמדות ל-5 ס"מ.',
     door: 'נוגעים על קיר כדי להוסיף דלת (90 ס"מ).',
     window: 'נוגעים על קיר כדי להוסיף חלון (120 ס"מ).',
+    furn: 'בוחרים פריט מהספרייה ונוגעים במקום להניח אותו. אחר כך: בחירה ← גרירה להזזה, וכפתור סיבוב.',
     calib: 'כיול: נוגעים בתחילת מידה ידועה בסרטוט, ואז בסופה. אחר כך מקלידים את המידה האמיתית בס"מ.'
   };
   $('#hint').textContent = hints[t] || '';
   draw();
 }
 function bindTools() {
-  document.querySelectorAll('#tools .chip').forEach(c => c.onclick = () => setTool(c.dataset.t));
+  document.querySelectorAll('#tools .chip').forEach(c => c.onclick = () => { if (c.dataset.t === 'furn') { furnPicker(); return; } setTool(c.dataset.t); });
   $('#wtSel').onchange = (e) => { P.wallType = e.target.value; setTool('wall'); };
 }
 
@@ -286,6 +374,7 @@ function bindPointer() {
     const pt = toWorld(e.clientX, e.clientY);
     const drawing = ['wall', 'calib'].includes(P.tool);
     P.gesture = { type: drawing ? 'draw' : 'tap', sx: e.clientX, sy: e.clientY, view: { ...P.view }, moved: false };
+    if (P.tool === 'select' && !P.showOriginal) { const f = hitFurn(pt); if (f && P.sel?.kind === 'furn' && P.sel.id === f.id) Object.assign(P.gesture, { type: 'drag', f, ox: f.x - pt.x, oy: f.y - pt.y }); }
     if (drawing) { P.cursor = snap(pt, P.tool === 'wall' ? P.chain : P.calib?.a); draw(); }
   });
   el.addEventListener('pointermove', e => {
@@ -304,6 +393,7 @@ function bindPointer() {
     }
     if (Math.hypot(e.clientX - g.sx, e.clientY - g.sy) > 6) g.moved = true;
     if (g.type === 'draw') { P.cursor = snap(toWorld(e.clientX, e.clientY), P.tool === 'wall' ? P.chain : P.calib?.a); draw(); }
+    else if (g.type === 'drag') { if (g.moved) { const w = toWorld(e.clientX, e.clientY); g.f.x = Math.round((w.x + g.ox) / 5) * 5; g.f.y = Math.round((w.y + g.oy) / 5) * 5; draw(); } }
     else if (g.moved) { P.view.tx = g.view.tx + e.clientX - g.sx; P.view.ty = g.view.ty + e.clientY - g.sy; draw(); }
   });
   const up = e => {
@@ -313,6 +403,7 @@ function bindPointer() {
     if (g?.type === 'pinch') { if (P.pointers.size === 0) P.gesture = null; return; }
     P.gesture = null; if (!g) return;
     if (g.type === 'draw' && P.cursor) return commitPoint(P.cursor);
+    if (g.type === 'drag') { if (g.moved) { changed(); renderProps(); } else onTap(toWorld(e.clientX, e.clientY)); return; }
     if (g.type === 'tap' && !g.moved) onTap(toWorld(e.clientX, e.clientY));
   };
   el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
@@ -334,7 +425,33 @@ function commitPoint(pt) {
   P.chain = { x: pt.x, y: pt.y }; P.cursor = null; changed(); draw(); renderProps();
 }
 
+function hitFurn(pt) {
+  const list = cur().furniture || [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const f = list[i], a = -(f.rot || 0) * Math.PI / 180, dx = pt.x - f.x, dy = pt.y - f.y;
+    const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+    if (Math.abs(lx) <= f.w / 2 && Math.abs(ly) <= f.d / 2) return f;
+  }
+  return null;
+}
+function furnPicker() {
+  if (P.showOriginal) return toast('במצב "לפני" אי אפשר לערוך');
+  const cats = [...new Set(Object.values(FURN).map(f => f.cat))];
+  modal('🛋️ ספריית ריהוט וסניטריה', cats.map(c => `<h3 style="margin-top:10px">${c}</h3><div class="thumbs">${Object.entries(FURN).filter(([, f]) => f.cat === c).map(([k, f]) => {
+    const pad = 30, vw = f.w + pad * 2, vh = f.d + pad * 2;
+    return `<div class="t" data-k="${k}" style="background:#fff;aspect-ratio:auto;padding:4px;text-align:center"><svg viewBox="${-pad} ${-pad} ${vw} ${vh}" style="width:100%;height:70px"><g fill="#fff" stroke="#4a433d" stroke-width="${Math.max(vw, vh) / 90}">${f.svg(f.w, f.d)}</g></svg><div style="font-size:11px;line-height:1.2">${f.name}<br><span class="muted">${f.w}×${f.d}</span></div></div>`;
+  }).join('')}</div>`).join('') + '<div class="muted" style="margin-top:10px">מידות לפי חוברת הריהוט של הקורס. אפשר לשנות מידה אחרי ההנחה.</div>', (b, close) => {
+    b.querySelectorAll('[data-k]').forEach(el => el.onclick = () => { P.furnType = el.dataset.k; close(); setTool('furn'); toast(`נוגעים בתוכנית כדי להניח: ${FURN[P.furnType].name}`); });
+  });
+}
 function onTap(pt) {
+  if (P.tool === 'furn' && P.furnType) {
+    const d = FURN[P.furnType];
+    const f = { id: 'f' + uid(), type: P.furnType, x: Math.round(pt.x / 5) * 5, y: Math.round(pt.y / 5) * 5, rot: 0, w: d.w, d: d.d };
+    P.plan.furniture.push(f); P.sel = { kind: 'furn', id: f.id }; P.tool = 'select'; P.furnType = null;
+    changed(); setTool('select'); renderProps(); return;
+  }
+  if (P.tool === 'select') { const f = hitFurn(pt); if (f) { P.sel = { kind: 'furn', id: f.id }; draw(); renderProps(); return; } }
   if (P.tool === 'door' || P.tool === 'window') {
     const h = hitWall(pt); if (!h) return toast('נוגעים על קיר');
     const r = openingRule(h.w, P.tool); if (!checkRule(r)) return;
@@ -353,6 +470,36 @@ function renderProps() {
   const box = $('#props'); if (!box) return;
   const pl = cur(), ro = P.showOriginal;
   if (!P.sel) { box.innerHTML = ''; return; }
+  if (P.sel.kind === 'furn') {
+    const f = (pl.furniture || []).find(x => x.id === P.sel.id); if (!f) { box.innerHTML = ''; return; }
+    const def = FURN[f.type], cl = clearances(f, pl), rule = FURN_RULES[f.type], issues = [];
+    const sideTxt = (v) => v === Infinity ? 'אין קיר' : (v < 3 ? 'צמוד לקיר' : fmt(v) + ' ס"מ');
+    if (rule) {
+      if (rule.all) for (const [n, v] of [['אחור', cl.back], ['חזית', cl.front], ['ימין', cl.right], ['שמאל', cl.left]]) { if (v < rule.all) issues.push(`${n}: ${sideTxt(v)} — מינימום ${rule.all}`); else if (rule.maxAll && v < Infinity && v > rule.maxAll + 60) {} }
+      if (rule.front && cl.front < rule.front) issues.push(`חזית: ${sideTxt(cl.front)} — מינימום ${rule.front}`);
+      if (rule.sides) {
+        const sides = [cl.left, cl.right];
+        if (rule.anySide) { const open = Math.max(...sides); if (open < 60) issues.push(`צד פתוח: ${sideTxt(open)} — מינימום 60`); }
+        else for (const [i, v] of sides.entries()) if (v < 60) issues.push(`${i ? 'ימין' : 'שמאל'}: ${sideTxt(v)} — מינימום 60`);
+      }
+    }
+    box.innerHTML = `<div class="card"><h3>🛋️ ${def.name}</h3>
+      <div class="grid2"><div><label>רוחב (ס"מ)</label><input id="fw" type="number" inputmode="numeric" value="${f.w}" ${ro ? 'disabled' : ''}></div>
+        <div><label>עומק (ס"מ)</label><input id="fd" type="number" inputmode="numeric" value="${f.d}" ${ro ? 'disabled' : ''}></div></div>
+      <div class="muted" style="margin-top:8px">מרחק לקירות: חזית ${sideTxt(cl.front)} · אחור ${sideTxt(cl.back)} · ימין ${sideTxt(cl.right)} · שמאל ${sideTxt(cl.left)}</div>
+      ${issues.length ? `<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div><b>מרווח קטן מהמומלץ</b><br>${issues.map(esc).join('<br>')}<br><span class="muted">${esc(rule.msg)}</span></div></div>` : rule ? `<div class="rule green" style="margin-top:8px"><span class="dot green"></span><div>המרווחים תקינים ✓</div></div>` : ''}
+      ${ro ? '' : `<div class="grid2" style="margin-top:10px"><button class="btn sec" id="frot">⟳ סיבוב 90°</button><button class="btn sec" id="fdup">⧉ שכפול</button></div>
+      <div style="height:8px"></div><button class="btn danger full" id="fdel">מחיקה</button>
+      <div class="muted" style="margin-top:6px">להזזה: גוררים את הפריט המסומן באצבע.</div>`}</div>`;
+    if (ro) return;
+    const upd = () => { changed(); draw(); renderProps(); };
+    $('#fw').onchange = e => { const v = +e.target.value; if (v > 0) { f.w = v; upd(); } };
+    $('#fd').onchange = e => { const v = +e.target.value; if (v > 0) { f.d = v; upd(); } };
+    $('#frot').onclick = () => { f.rot = ((f.rot || 0) + 90) % 360; upd(); };
+    $('#fdup').onclick = () => { const n = { ...f, id: 'f' + uid(), x: f.x + 30, y: f.y + 30 }; P.plan.furniture.push(n); P.sel = { kind: 'furn', id: n.id }; upd(); };
+    $('#fdel').onclick = () => { P.plan.furniture = P.plan.furniture.filter(x => x !== f); P.sel = null; upd(); };
+    return;
+  }
   if (P.sel.kind === 'wall') {
     const w = pl.walls.find(x => x.id === P.sel.id); if (!w) { box.innerHTML = ''; return; }
     box.innerHTML = `<div class="card"><h3>🧱 קיר · ${fmt(len(w))} ס"מ</h3>
@@ -391,8 +538,10 @@ function renderProps() {
     box.innerHTML = `<div class="card"><h3>${o.kind === 'door' ? '🚪 דלת' : '🪟 חלון'}</h3>
       <div class="grid2"><div><label>רוחב (ס"מ)</label><input id="ow" type="number" inputmode="numeric" value="${fmt(o.width)}" ${ro ? 'disabled' : ''}></div>
         <div><label>גובה (ס"מ)</label><input id="oh" type="number" inputmode="numeric" value="${fmt(o.height)}" ${ro ? 'disabled' : ''}></div></div>
+      <label>סוג</label><select id="ost" ${ro ? 'disabled' : ''}>${Object.entries(OPENING_STYLES[o.kind]).map(([k, v]) => `<option value="${k}" ${(o.style || (o.kind === 'door' ? 'swing' : 'casement')) === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
       <div class="grid2"><div><label>מרחק מתחילת הקיר (ס"מ)</label><input id="op" type="number" inputmode="numeric" value="${fmt(o.pos - o.width / 2)}" ${ro ? 'disabled' : ''}></div>
         <div><label>${o.kind === 'window' ? 'גובה אדן (ס"מ)' : 'כיוון פתיחה'}</label>${o.kind === 'window' ? `<input id="os" type="number" inputmode="numeric" value="${fmt(o.sill)}" ${ro ? 'disabled' : ''}>` : `<button class="btn sec full" id="oflip" ${ro ? 'disabled' : ''}>⇄ הפוך</button>`}</div></div>
+      ${OPENING_TIPS[o.style || ''] ? `<div class="muted" style="margin-top:6px">💡 ${OPENING_TIPS[o.style]}</div>` : ''}
       ${issues.map(i => `<div class="rule ${i.level}" style="margin-top:8px"><span class="dot ${i.level}"></span><div>${esc(i.msg)}</div></div>`).join('')}
       ${ro ? '' : '<div style="height:10px"></div><button class="btn danger full" id="odel">מחיקה</button>'}</div>`;
     if (ro) return;
@@ -402,11 +551,35 @@ function renderProps() {
     $('#op').onchange = e => { const v = +e.target.value; if (v >= 0) { o.pos = v + o.width / 2; upd(); } };
     if ($('#os')) $('#os').onchange = e => { o.sill = Math.max(0, +e.target.value || 0); upd(); };
     if ($('#oflip')) $('#oflip').onclick = () => { o.flip = !o.flip; upd(); };
+    $('#ost').onchange = e => { o.style = e.target.value; upd(); };
     $('#odel').onclick = () => {
       if ((w.type === 'mamad') && !confirm('זה פתח בקיר ממ"ד (כנראה החלון/הדלת המקוריים של הממ"ד). אסור לשנות אותם. למחוק מהסקיצה בכל זאת?')) return;
       P.plan.openings = P.plan.openings.filter(x => x !== o); P.sel = null; upd();
     };
   }
+}
+
+// מרחק מכל צד של הפריט לקיר הקרוב (קרן מאמצע הצד החוצה)
+function clearances(f, pl) {
+  const a = (f.rot || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+  const loc = (lx, ly) => ({ x: f.x + lx * ca - ly * sa, y: f.y + lx * sa + ly * ca });
+  const dirs = { back: [0, -1, f.d / 2], front: [0, 1, f.d / 2], left: [-1, 0, f.w / 2], right: [1, 0, f.w / 2] };
+  const out = {};
+  for (const [k, [dx, dy, half]] of Object.entries(dirs)) {
+    let best = Infinity;
+    const samples = (k === 'back' || k === 'front') ? [-f.w / 2 + 2, 0, f.w / 2 - 2] : [-f.d / 2 + 2, 0, f.d / 2 - 2];
+    for (const t of samples) {
+      const o = (k === 'back' || k === 'front') ? loc(t, dy * half) : loc(dx * half, t);
+      const v = { x: dx * ca - dy * sa, y: dx * sa + dy * ca };
+      for (const w of pl.walls) {
+        const ex = w.x2 - w.x1, ey = w.y2 - w.y1, den = v.x * ey - v.y * ex; if (Math.abs(den) < 1e-9) continue;
+        const tt = ((w.x1 - o.x) * ey - (w.y1 - o.y) * ex) / den, uu = ((w.x1 - o.x) * v.y - (w.y1 - o.y) * v.x) / den;
+        if (tt > -1 && uu >= 0 && uu <= 1) { const L = Math.hypot(ex, ey), cos = Math.abs((v.x * -ey + v.y * ex) / L); best = Math.min(best, Math.max(0, tt - (w.thick / 2) / (cos || 1))); }
+      }
+    }
+    out[k] = best;
+  }
+  return out;
 }
 
 // ---------------- סרטוט רקע (תמונה / PDF) ----------------
@@ -471,7 +644,7 @@ async function open3D(plan) {
   const group = new THREE.Group(); scene.add(group);
   let showing = plan;
   const H = (plan.height || 280) / 100;
-  function build(pl) {
+  let build = function (pl) {
     while (group.children.length) { const c = group.children.pop(); c.geometry?.dispose(); }
     const xs = pl.walls.flatMap(w => [w.x1, w.x2]), ys = pl.walls.flatMap(w => [w.y1, w.y2]);
     const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
@@ -501,6 +674,20 @@ async function open3D(plan) {
     }
     return { cx: (minx + maxx) / 200, cz: (miny + maxy) / 200, size: Math.max(maxx - minx, maxy - miny) / 100 };
   }
+  function addFurniture(pl) {
+    for (const f of (pl.furniture || [])) {
+      const d = FURN[f.type]; if (!d) continue;
+      const mat = new THREE.MeshStandardMaterial({ color: d.c3, roughness: 0.8 });
+      const geo = d.round ? new THREE.CylinderGeometry(f.w / 200, f.w / 200, d.h / 100, 32) : new THREE.BoxGeometry(f.w / 100, d.h / 100, f.d / 100);
+      const mesh = new THREE.Mesh(geo, mat); mesh.position.set(f.x / 100, d.h / 200, f.y / 100); mesh.rotation.y = -(f.rot || 0) * Math.PI / 180; group.add(mesh);
+      if (d.chairs) { const cm = new THREE.MeshStandardMaterial({ color: 0x6f5a48, roughness: 0.8 });
+        const pts = d.chairs === 6 ? [-1, 0, 1].flatMap(i => [[i * f.w / 3, -f.d / 2 - 15], [i * f.w / 3, f.d / 2 + 15]]) : [[0, -f.d / 2 - 15], [0, f.d / 2 + 15], [-f.w / 2 - 15, 0], [f.w / 2 + 15, 0]];
+        const a = (f.rot || 0) * Math.PI / 180;
+        for (const [lx, ly] of pts) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), cm); c.position.set((f.x + lx * Math.cos(a) - ly * Math.sin(a)) / 100, 0.225, (f.y + lx * Math.sin(a) + ly * Math.cos(a)) / 100); group.add(c); }
+      }
+    }
+  }
+  const build0 = build; build = (pl) => { const r = build0(pl); addFurniture(pl); return r; };
   let info = build(plan);
   const controls = new OrbitControls(camera, renderer.domElement);
   function orbit() {
@@ -542,7 +729,7 @@ function buildDXF(plan) {
   const out = [];
   const add = (...a) => out.push(...a);
   const Y = (y) => -y; // DXF: ציר Y כלפי מעלה
-  const layers = { WALL_INTERIOR: 8, WALL_EXTERIOR: 7, WALL_BEARING: 1, WALL_MAMAD: 1, WALL_UNVERIFIED: 2, DOORS: 4, WINDOWS: 5, DIMENSIONS: 3 };
+  const layers = { FURNITURE: 30, WALL_INTERIOR: 8, WALL_EXTERIOR: 7, WALL_BEARING: 1, WALL_MAMAD: 1, WALL_UNVERIFIED: 2, DOORS: 4, WINDOWS: 5, DIMENSIONS: 3 };
   const wl = (t) => ({ interior: 'WALL_INTERIOR', exterior: 'WALL_EXTERIOR', bearing: 'WALL_BEARING', mamad: 'WALL_MAMAD', unknown: 'WALL_UNVERIFIED' }[t] || 'WALL_INTERIOR');
   const line = (L, x1, y1, x2, y2) => add('0', 'LINE', '8', L, '10', x1.toFixed(2), '20', Y(y1).toFixed(2), '30', '0', '11', x2.toFixed(2), '21', Y(y2).toFixed(2), '31', '0');
   const text = (L, x, y, h, s, rot = 0) => add('0', 'TEXT', '8', L, '10', x.toFixed(2), '20', Y(y).toFixed(2), '30', '0', '40', h.toFixed(2), '1', s, '50', rot.toFixed(2), '72', '1', '11', x.toFixed(2), '21', Y(y).toFixed(2), '31', '0');
@@ -582,6 +769,14 @@ function buildDXF(plan) {
       const m = along(w, L / 2), off = w.thick / 2 + 15; let ang = Math.atan2(-m.uy, m.ux) * 180 / Math.PI; if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
       text('DIMENSIONS', m.x - m.uy * off, m.y + m.ux * off, 10, String(fmt(L)), ang);
     }
+  }
+  for (const f of (plan.furniture || [])) {
+    const d = FURN[f.type]; if (!d) continue;
+    const a = (f.rot || 0) * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
+    const P2 = (lx, ly) => [f.x + lx * c - ly * sn, f.y + lx * sn + ly * c];
+    if (d.round) add('0', 'CIRCLE', '8', 'FURNITURE', '10', f.x.toFixed(2), '20', Y(f.y).toFixed(2), '30', '0', '40', (f.w / 2).toFixed(2));
+    else { const q = [P2(-f.w / 2, -f.d / 2), P2(f.w / 2, -f.d / 2), P2(f.w / 2, f.d / 2), P2(-f.w / 2, f.d / 2)]; for (let i = 0; i < 4; i++) line('FURNITURE', ...q[i], ...q[(i + 1) % 4]); }
+    text('FURNITURE', f.x, f.y, 8, d.name, 0);
   }
   add('0', 'ENDSEC', '0', 'EOF');
   return out.join('\r\n');

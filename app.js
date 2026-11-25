@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.5.0';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -42,7 +42,7 @@ const DB = {
   }
 };
 
-let S = { projects: [], catalog: [], settings: { apiKey: '', model: DEFAULT_MODEL, printNotes: true } };
+let S = { projects: [], catalog: [], settings: { apiKey: '', model: DEFAULT_MODEL, printNotes: true, introLogo: true, introPresenter: true } };
 // כללים ורשימות שניתנים לעריכה (נשמרים ב-S.custom ומסתנכרנים למאגר המשותף)
 const clone = (o) => JSON.parse(JSON.stringify(o));
 function R() { return S.custom || { checks: CHECKS, fixed: FIXED_RULES, styles: STYLES, catCats: CATALOG_CATS }; }
@@ -459,7 +459,8 @@ function evalCheck(ch, v) {
   return { ok: true, txt: 'תקין ✓' };
 }
 function renderChecksTab(body, p, r) {
-  const checks = [...(R().checks[r.cat] || []), ...R().checks._all];
+  const own = R().checks[r.cat] || [];
+  const checks = [...own, ...R().checks._all.filter(c => !own.some(x => x.key === c.key))];
   const fixed = [...(R().fixed[r.cat] || []), ...R().fixed._all];
   const roomChecks = r.cat === 'corridor' && r.W ? `<div class="muted">רוחב החדר שהוגדר: ${r.W} ס"מ</div>` : '';
   body.innerHTML = `
@@ -833,6 +834,14 @@ function renderSettings(app) {
       <label>שם המודל</label><input id="model" value="${esc(st.model || DEFAULT_MODEL)}" dir="ltr">
       <div class="muted" style="margin-top:6px">ברירת מחדל: ${DEFAULT_MODEL}. אפשר להחליף למודל חדש יותר.</div>
       <div style="height:10px"></div><button class="btn sec full" id="test">בדיקת חיבור</button></div>
+    <div class="card"><h3>🎬 פתיח</h3>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="inLogo" style="width:auto" ${st.introLogo !== false ? 'checked' : ''}> סרטון הלוגו בפתיחת האפליקציה</label>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="inPres" style="width:auto" ${st.introPresenter !== false ? 'checked' : ''}> סרטון המציגה (אחרי הלוגו)</label>
+      <div class="row" style="margin-top:10px"><button class="btn sec sm" id="playIntro">▶ צפייה בפתיח עכשיו</button></div></div>
+    <div class="card"><h3>🔄 עדכון גרסה</h3>
+      <div class="muted">גרסה מותקנת: ${APP_VERSION}</div>
+      <div style="height:8px"></div><button class="btn full" id="updNow">🔄 בדיקת עדכון ועדכון עכשיו</button>
+      <div class="muted" style="margin-top:6px">מעדכן את האפליקציה, הסרטונים והאייקון. הפרויקטים והקטלוג לא נמחקים.</div></div>
     <div class="card"><h3>📄 הדפסה</h3>
       <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="pn" style="width:auto" ${st.printNotes ? 'checked' : ''}> להדפיס הערות בתיק הפרויקט</label></div>
     <div class="card"><h3>📋 רשימות לעריכה</h3>
@@ -868,6 +877,10 @@ function renderSettings(app) {
   $('#showK').onclick = () => { const k = $('#key'); k.style.webkitTextSecurity = k.style.webkitTextSecurity === 'none' ? 'disc' : 'none'; };
   $('#model').onchange = e => { st.model = e.target.value.trim() || DEFAULT_MODEL; st.aiUpdated = Date.now(); save(); Sync.pushAI(); };
   $('#pn').onchange = e => { st.printNotes = e.target.checked; save(); };
+  $('#inLogo').onchange = e => { st.introLogo = e.target.checked; save(); };
+  $('#inPres').onchange = e => { st.introPresenter = e.target.checked; save(); };
+  $('#playIntro').onclick = () => playIntro(true);
+  $('#updNow').onclick = () => checkUpdate(true);
   $('#test').onclick = testKey;
   if (Sync.ok()) {
     $('#invite').onclick = () => {
@@ -1018,7 +1031,9 @@ function showHelp() {
   if (jq) { history.replaceState(null, '', location.pathname); if (!Sync.ok() || confirm('להצטרף למאגר המשותף החדש?')) Sync.join(jq); }
   migrateRules();
   render();
+  playIntro(false);
   Sync.run(false);
+  setTimeout(() => checkUpdate(false), 4000);
 })();
 
 // כשנוספים כללים חדשים לקובץ rules.js — מוסיפים אותם גם לכללים שנערכו, בלי למחוק עריכות
@@ -1033,4 +1048,62 @@ function migrateRules() {
     for (const r of list) { const i = C.checks[k].findIndex(x => x.key === r.key); if (i < 0) C.checks[k].push(clone(r)); else if (!C.checks[k][i].edited) C.checks[k][i] = clone(r); }
   }
   C.base = window.RULES_VERSION; C.updated = Date.now(); save(); Sync.pushRules();
+}
+
+
+// =====================================================================
+// פתיח (לוגו + מציגה)
+// =====================================================================
+function playIntro(force) {
+  const st = S.settings;
+  const list = [];
+  if (force || st.introLogo !== false) list.push({ src: 'media/intro-logo.mp4', sound: false });
+  if (force || st.introPresenter !== false) list.push({ src: 'media/intro-presenter.mp4', sound: true });
+  if (!list.length) return;
+  const d = document.createElement('div'); d.id = 'splash';
+  d.innerHTML = `<video playsinline webkit-playsinline preload="auto" muted></video>
+    <button class="sbtn skip">דילוג ⏭</button><button class="sbtn snd" style="display:none">🔊 הפעלת קול</button>`;
+  document.body.appendChild(d);
+  const v = d.querySelector('video'), snd = d.querySelector('.snd');
+  let i = 0, done = false;
+  const end = () => { if (done) return; done = true; d.style.transition = 'opacity .4s'; d.style.opacity = 0; setTimeout(() => d.remove(), 400); };
+  const next = async () => {
+    if (i >= list.length) return end();
+    const it = list[i++]; v.src = it.src; v.muted = true; snd.style.display = 'none';
+    if (it.sound) {
+      v.muted = false;
+      try { await v.play(); return; } catch { v.muted = true; snd.style.display = ''; }
+    }
+    try { await v.play(); } catch { end(); }
+  };
+  v.onended = next; v.onerror = next;
+  d.querySelector('.skip').onclick = (e) => { e.stopPropagation(); if (i < list.length && list[i - 1]?.src.includes('logo')) next(); else end(); };
+  snd.onclick = (e) => { e.stopPropagation(); v.muted = false; v.play(); snd.style.display = 'none'; };
+  setTimeout(() => { if (!done && v.paused && v.currentTime === 0) end(); }, 25000);
+  next();
+}
+
+// =====================================================================
+// עדכון גרסה
+// =====================================================================
+async function checkUpdate(manual) {
+  let latest = null;
+  try { const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); latest = (await r.json()).version; } catch { if (manual) toast('אין חיבור לאינטרנט'); return; }
+  if (latest && latest !== APP_VERSION) {
+    if (manual) return doUpdate();
+    if (document.getElementById('updBar')) return;
+    const b = document.createElement('div'); b.id = 'updBar';
+    b.innerHTML = `<div style="flex:1">✨ יש גרסה חדשה (${esc(latest)})</div><button>עדכון</button><span style="cursor:pointer;padding:0 4px">✕</span>`;
+    b.querySelector('button').onclick = doUpdate; b.querySelector('span').onclick = () => b.remove();
+    document.body.appendChild(b);
+  } else if (manual) {
+    if (confirm(`יש לך את הגרסה העדכנית (${APP_VERSION}). לרענן בכל זאת את כל הקבצים (סרטונים, אייקון)?`)) doUpdate();
+  }
+}
+async function doUpdate() {
+  toast('מעדכן…', 4000);
+  try { save(); await new Promise(r => setTimeout(r, 400)); } catch {}
+  try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch {}
+  try { const regs = await navigator.serviceWorker?.getRegistrations(); for (const r of regs || []) await r.unregister(); } catch {}
+  location.replace(location.pathname + '?v=' + Date.now());
 }
