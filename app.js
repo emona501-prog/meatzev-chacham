@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.1';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -669,6 +669,8 @@ const Sync = {
       // מחיקות שלא נשלחו
       for (const id of [...(S.tombs || [])]) await this.deleteItem({ id });
       const rulesGot = await this.syncRules();
+      const aiGot = await this.syncAI();
+      if (aiGot) toast('מפתח ה-AI התקבל מהמאגר המשותף ✓');
       const remote = await this.listItems();
       const seen = new Set(); let got = 0, sent = 0;
       for (const doc of remote) {
@@ -687,7 +689,7 @@ const Sync = {
       S.sync.last = Date.now(); save();
       if (manual || got) toast(`הסנכרון הושלם${got ? ` · התקבלו ${got} עדכונים` : ''}${sent ? ` · נשלחו ${sent}` : ''}`);
       if (rulesGot && manual) toast('הכללים עודכנו מהמאגר');
-      if ((got && V.tab === 'catalog') || (rulesGot && V.tab !== 'projects')) render();
+      if ((got && V.tab === 'catalog') || ((rulesGot || aiGot) && V.tab !== 'projects')) render();
     } catch (e) { if (manual) toast('הסנכרון נכשל: ' + e.message, 4500); }
     finally { this.busy = false; }
   },
@@ -701,6 +703,20 @@ const Sync = {
     const rUpd = +(d?.fields?.updated?.integerValue || 0), lUpd = S.custom?.updated || 0;
     if (d && rUpd > lUpd) { S.custom = JSON.parse(d.fields.data.stringValue); save(); return true; }
     if (S.custom && lUpd > rUpd) await this.pushRules();
+    return false;
+  },
+  async pushAI() {
+    const st = S.settings;
+    if (!this.ok() || st.shareAI === false) return;
+    try { await this.req('/meta/ai', { method: 'PATCH', body: JSON.stringify({ fields: { key: { stringValue: st.apiKey || '' }, model: { stringValue: st.model || DEFAULT_MODEL }, updated: { integerValue: String(st.aiUpdated || Date.now()) } } }) }); }
+    catch (e) { console.warn(e); }
+  },
+  async syncAI() {
+    const st = S.settings; if (st.shareAI === false) return false;
+    const d = await this.req('/meta/ai'); const f = d?.fields;
+    const rUpd = +(f?.updated?.integerValue || 0), lUpd = st.aiUpdated || 0;
+    if (f && rUpd > lUpd) { st.apiKey = f.key?.stringValue || ''; st.model = f.model?.stringValue || DEFAULT_MODEL; st.aiUpdated = rUpd; save(); return true; }
+    if (lUpd > rUpd && st.apiKey) await this.pushAI();
     return false;
   },
   inviteCode() { return btoa(unescape(encodeURIComponent(JSON.stringify({ p: S.sync.projectId, k: S.sync.apiKey, c: S.sync.code })))); },
@@ -812,6 +828,8 @@ function renderSettings(app) {
       <div class="row"><input id="key" type="text" class="grow" value="${esc(st.apiKey)}" placeholder="מדביקים כאן את המפתח" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" dir="ltr" style="flex:1;-webkit-text-security:disc">
         <button class="btn sec sm" id="showK">👁</button></div>
       <div class="muted" style="margin-top:6px">המפתח נשמר רק בטלפון הזה. מקבלים אותו ב-aistudio.google.com ← Get API key. להדמיות צריך להפעיל חיוב בחשבון גוגל (מומלץ עם תקרת הוצאה).</div>
+      ${Sync.ok() ? `<label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="shareAI" style="width:auto" ${st.shareAI !== false ? 'checked' : ''}> לשתף את המפתח עם כל המחוברים למאגר המשותף</label>
+        <div class="muted">כשמסומן, המפתח מגיע לבד לטלפונים של השותפים, וכל ההדמיות שלהם מחויבות באותו חשבון.</div>` : ''}
       <label>שם המודל</label><input id="model" value="${esc(st.model || DEFAULT_MODEL)}" dir="ltr">
       <div class="muted" style="margin-top:6px">ברירת מחדל: ${DEFAULT_MODEL}. אפשר להחליף למודל חדש יותר.</div>
       <div style="height:10px"></div><button class="btn sec full" id="test">בדיקת חיבור</button></div>
@@ -845,9 +863,10 @@ function renderSettings(app) {
       <div style="font-size:14px;line-height:1.6"><b>אנדרואיד:</b> בכרום ← תפריט ⋮ ← "הוסף למסך הבית".<br>
       <b>אייפון:</b> רק ב-Safari ← כפתור השיתוף ⬆️ ← "הוסף למסך הבית".</div></div>
     <div class="muted" style="text-align:center">מעצב חכם · גרסה ${APP_VERSION} · חי אפליקציות</div>`;
-  $('#key').onchange = e => { st.apiKey = e.target.value.trim(); save(); toast('המפתח נשמר'); };
+  $('#key').onchange = e => { st.apiKey = e.target.value.trim(); st.aiUpdated = Date.now(); save(); Sync.pushAI(); toast(Sync.ok() && st.shareAI !== false ? 'המפתח נשמר ונשלח לשותפים במאגר' : 'המפתח נשמר'); };
+  if ($('#shareAI')) $('#shareAI').onchange = e => { st.shareAI = e.target.checked; save(); if (st.shareAI) { st.aiUpdated = Date.now(); Sync.pushAI(); } };
   $('#showK').onclick = () => { const k = $('#key'); k.style.webkitTextSecurity = k.style.webkitTextSecurity === 'none' ? 'disc' : 'none'; };
-  $('#model').onchange = e => { st.model = e.target.value.trim() || DEFAULT_MODEL; save(); };
+  $('#model').onchange = e => { st.model = e.target.value.trim() || DEFAULT_MODEL; st.aiUpdated = Date.now(); save(); Sync.pushAI(); };
   $('#pn').onchange = e => { st.printNotes = e.target.checked; save(); };
   $('#test').onclick = testKey;
   if (Sync.ok()) {
