@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.1';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -84,10 +84,20 @@ function compressImage(file, max = 1600, q = 0.85) {
     fr.onerror = rej; fr.readAsDataURL(file);
   });
 }
-function pickFiles(multiple = false) {
+function pickFiles(multiple = false, camera = false) {
   return new Promise(res => {
-    const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.multiple = multiple;
+    const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.multiple = multiple && !camera;
+    if (camera) i.setAttribute('capture', 'environment');
     i.onchange = () => res([...i.files]); i.click();
+  });
+}
+// בוחרים: צילום במצלמה או מהגלריה
+function pickPhoto(multiple = false) {
+  return new Promise(res => {
+    const close = modal('הוספת תמונה', `<div class="grid2"><button class="btn" id="pcCam">📷 צילום עכשיו</button><button class="btn sec" id="pcGal">🖼️ מהגלריה</button></div>`, (b, cl) => {
+      $('#pcCam', b).onclick = async () => { cl(); res(await pickFiles(false, true)); };
+      $('#pcGal', b).onclick = async () => { cl(); res(await pickFiles(multiple)); };
+    });
   });
 }
 
@@ -222,6 +232,7 @@ function roomForm(r) {
     if (!r) rn.value = catOf(rc.value).name;
     $('#ok', b).onclick = () => {
       const d = { cat: rc.value, name: rn.value.trim() || catOf(rc.value).name, L: +$('#rL', b).value || '', W: +$('#rW', b).value || '', H: +$('#rH', b).value || '' };
+      if ([d.L, d.W, d.H].filter(Boolean).every(v => v <= 20) && (d.L || d.W)) { ['L', 'W', 'H'].forEach(k => { if (d[k]) d[k] = Math.round(d[k] * 100); }); toast('המידות הוזנו במטרים — הומרו לס"מ', 3000); }
       if (r) Object.assign(r, d);
       else p.rooms.push({ id: uid(), ...d, photos: [], designs: [], checks: {}, notes: '', elements: [], created: Date.now() });
       p.updated = Date.now(); save(); close(); render();
@@ -261,7 +272,7 @@ async function renderRoom(app) {
 async function renderDesignTab(body, p, r) {
   body.innerHTML = `
     <div class="card"><div class="row" style="margin-bottom:10px"><h3 class="grow" style="margin:0">תמונות החדר (לפני)</h3>
-      <button class="btn sec sm" id="addPh">+ תמונה</button></div>
+      <button class="btn sec sm" id="addPh">📷 + תמונה</button></div>
       ${r.photos.length ? `<div class="thumbs" id="phs">${r.photos.map(id => `<div class="t" data-id="${id}"><img><button class="x">✕</button></div>`).join('')}</div>`
         : `<div class="muted">מצלמים את החדר מכמה זוויות, באור יום, מגובה העיניים.</div>`}
     </div>
@@ -278,7 +289,7 @@ async function renderDesignTab(body, p, r) {
     el.onclick = async () => viewImage(await getImg(el.dataset.id));
   }
   $('#addPh').onclick = async () => {
-    const files = await pickFiles(true); if (!files.length) return;
+    const files = await pickPhoto(true); if (!files.length) return;
     toast('מעבד תמונות…');
     for (const f of files) r.photos.push(await putImg(await compressImage(f)));
     p.updated = Date.now(); save(); renderRoom($('#app'));
@@ -330,7 +341,8 @@ function viewImage(src) {
 
 // ---------- סטודיו העיצוב ----------
 function studio(p, r, fromDesign) {
-  const sel = { base: fromDesign ? fromDesign.result : r.photos[0], style: fromDesign?.style || '', items: new Set(fromDesign?.items || []), keep: true };
+  const sel = { base: fromDesign ? fromDesign.result : r.photos[0], style: fromDesign?.style || '', items: new Set(fromDesign?.items || []), keep: true, extras: [] };
+  const roomNotes = [r.notes, ...(r.elements || []).map(e => e.title + ': ' + e.text)].filter(x => x && x.trim()).join('\n');
   const bases = [...r.photos.map(id => ({ id, label: 'מקור' })), ...r.designs.map(d => ({ id: d.result, label: 'הדמיה' }))];
   modal('✨ עיצוב חדש', `
     <label>1. על איזו תמונה מעצבים?</label>
@@ -340,7 +352,13 @@ function studio(p, r, fromDesign) {
     <label>3. מוצרים מהקטלוג (המערכת תשתמש בדיוק בהם)</label>
     ${S.catalog.length ? `<div class="chips" id="icats" style="margin-bottom:8px">${R().catCats.filter(c => S.catalog.some(x => x.cat === c)).map((c, i) => `<span class="chip ${i === 0 ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}</span>`).join('')}</div>
       <div class="thumbs" id="items"></div><div class="muted" id="selCount" style="margin-top:6px"></div>` : '<div class="muted">הקטלוג ריק. אפשר להוסיף מוצרים בלשונית "קטלוג".</div>'}
-    <label>4. מה לשנות? (במילים שלך)</label>
+    <label>4. אלמנטים מצולמים (ריצוף, ספה, וילון… — מתמונה שצילמת או מהגלריה)</label>
+    <div id="extras" class="thumbs"></div>
+    <button class="btn sec full" id="addEx" style="margin-top:6px">➕ הוספת אלמנט עם תמונה</button>
+    <div class="muted" style="margin-top:4px">ה-AI מתאר כל אלמנט בדיוק (חומר, צבע, דוגמה, גודל) ומכניס אותו להנחיה.</div>
+    ${roomNotes ? `<label style="display:flex;gap:8px;align-items:center;color:var(--ink);margin-top:10px"><input type="checkbox" id="useNotes" checked style="width:auto"> לכלול את ההערות של החדר</label>
+      <div class="muted" style="white-space:pre-wrap;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:13px">${esc(roomNotes)}</div>` : ''}
+    <label>5. מה לשנות? (במילים שלך)</label>
     <textarea id="ins" placeholder="למשל: להחליף את הריצוף לאריח שבחרתי, לצבוע את הקיר מאחורי המיטה בבז' חם, להשאיר את הארון כמו שהוא">${esc('')}</textarea>
     <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="keep" checked style="width:auto"> לשנות רק מה שביקשתי, כל השאר נשאר בדיוק אותו דבר</label>
     <div style="height:14px"></div>
@@ -371,18 +389,62 @@ function studio(p, r, fromDesign) {
     };
     b.querySelectorAll('#icats .chip').forEach(ch => ch.onclick = () => { b.querySelectorAll('#icats .chip').forEach(x => x.classList.toggle('on', x === ch)); showCat(ch.dataset.c); });
     const first = b.querySelector('#icats .chip'); if (first) showCat(first.dataset.c); selCount();
+    const drawExtras = () => {
+      const box = $('#extras', b); box.innerHTML = '';
+      sel.extras.forEach((x, i) => {
+        const d = document.createElement('div'); d.className = 't';
+        d.innerHTML = `<img src="${x.img}"><button class="x">✕</button><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:11px;padding:12px 5px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.cat)}${x.note ? ' · ' + esc(x.note) : ''}</div>`;
+        d.querySelector('.x').onclick = (e) => { e.stopPropagation(); sel.extras.splice(i, 1); drawExtras(); };
+        box.appendChild(d);
+      });
+    };
+    $('#addEx', b).onclick = () => {
+      let img = null;
+      modal('➕ אלמנט עם תמונה', `
+        <label>מה זה?</label><select id="exCat">${['ריצוף', 'חיפוי קיר', 'צבע קיר', 'משטח', 'ספה', 'כורסה', 'שולחן', 'כיסא', 'מיטה', 'וילון', 'שטיח', 'תאורה', 'ארון / נגרות', 'כלי סניטרי', 'ברז', 'צמח', 'אביזר', 'אחר'].map(c => `<option>${c}</option>`).join('')}</select>
+        <label>תיאור קצר (לא חובה)</label><input id="exNote" placeholder="למשל: גרניט פורצלן 60×120 אפור בהיר, מט">
+        <label>תמונה</label><img id="exImg" style="max-width:100%;max-height:200px;border-radius:12px;display:none">
+        <div class="grid2"><button class="btn sec" id="exCam">📷 צילום</button><button class="btn sec" id="exGal">🖼️ מהגלריה</button></div>
+        <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="exSave" style="width:auto"> לשמור גם בקטלוג</label>
+        <div style="height:12px"></div><button class="btn full" id="exOk">הוספה</button>`, (mb, mclose) => {
+        const setF = async (fs) => { if (!fs[0]) return; img = await catalogImageData(fs[0]); $('#exImg', mb).src = img; $('#exImg', mb).style.display = ''; };
+        $('#exCam', mb).onclick = async () => setF(await pickFiles(false, true));
+        $('#exGal', mb).onclick = async () => setF(await pickFiles(false));
+        $('#exOk', mb).onclick = async () => {
+          if (!img) return toast('צריך תמונה של האלמנט');
+          const cat = $('#exCat', mb).value, note = $('#exNote', mb).value.trim();
+          sel.extras.push({ cat, note, img });
+          if ($('#exSave', mb).checked) {
+            const catalogCat = R().catCats.find(c => c.includes(cat.split(' ')[0])) || 'אחר';
+            const it = { id: uid(), name: note || cat, cat: catalogCat, supplier: '', dims: '', color: '', price: '', link: '', note: '', img: await putImg(img), updated: Date.now() };
+            S.catalog.push(it); Sync.pushItem(it, img); save();
+          }
+          mclose(); drawExtras();
+        };
+      });
+    };
+    const fullRequest = () => {
+      const typed = $('#ins', b).value.trim();
+      const notes = roomNotes && $('#useNotes', b)?.checked ? roomNotes : '';
+      return [typed, notes ? 'הערות החדר: ' + notes : ''].filter(Boolean).join('\n');
+    };
+    const gatherRefs = async () => {
+      const items = [...sel.items].map(id => S.catalog.find(x => x.id === id)).filter(Boolean);
+      const refs = []; for (const it of items) refs.push({ item: it, img: await getImg(it.img) || await Sync.fetchImg(it.img) });
+      for (const x of sel.extras) refs.push({ item: { name: x.note || x.cat, cat: x.cat, note: x.note, photo: true }, img: x.img });
+      return refs;
+    };
     $('#goPrompt', b).onclick = async () => {
       if (!S.settings.apiKey) { toast('צריך להכניס מפתח AI בהגדרות'); return; }
-      const ins = $('#ins', b).value.trim();
-      if (!ins && !sel.style && !sel.items.size) return toast('בוחרים סגנון, מוצר או כותבים מה לשנות');
+      const ins = fullRequest();
+      if (!ins && !sel.style && !sel.items.size && !sel.extras.length) return toast('בוחרים סגנון, מוצר, אלמנט או כותבים מה לשנות');
       sel.keep = $('#keep', b).checked;
       const out = $('#out', b), btn = $('#goPrompt', b);
       btn.disabled = true; out.innerHTML = `<div class="spinner"></div><div class="muted" style="text-align:center">מנתח את התמונה וכותב הנחיה…</div>`;
       try {
         const baseImg = await getImg(sel.base);
-        const items = [...sel.items].map(id => S.catalog.find(x => x.id === id)).filter(Boolean);
-        const refs = []; for (const it of items) refs.push({ item: it, img: await getImg(it.img) || await Sync.fetchImg(it.img) });
-        const res = await aiPromptHelper(r, sel, ins, items, baseImg);
+        const refs = await gatherRefs(); const items = refs.map(x => x.item);
+        const res = await aiPromptHelper(r, sel, ins, items, baseImg, refs);
         renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close);
       } catch (e) {
         out.innerHTML = `<div class="rule red" style="margin-top:12px"><span class="dot red"></span><div>${esc(e.message)}</div></div>`;
@@ -390,15 +452,14 @@ function studio(p, r, fromDesign) {
     };
     $('#go', b).onclick = async () => {
       if (!S.settings.apiKey) { toast('צריך להכניס מפתח AI בהגדרות'); return; }
-      const ins = $('#ins', b).value.trim();
-      if (!ins && !sel.style && !sel.items.size) return toast('בוחרים סגנון, מוצר או כותבים מה לשנות');
+      const ins = fullRequest();
+      if (!ins && !sel.style && !sel.items.size && !sel.extras.length) return toast('בוחרים סגנון, מוצר, אלמנט או כותבים מה לשנות');
       sel.keep = $('#keep', b).checked;
       const out = $('#out', b); const btn = $('#go', b);
       btn.disabled = true; out.innerHTML = `<div class="spinner"></div><div class="muted" style="text-align:center">יוצר הדמיה… זה לוקח בערך 10–30 שניות</div>`;
       try {
         const baseImg = await getImg(sel.base);
-        const items = [...sel.items].map(id => S.catalog.find(x => x.id === id)).filter(Boolean);
-        const refs = []; for (const it of items) refs.push({ item: it, img: await getImg(it.img) });
+        const refs = await gatherRefs(); const items = refs.map(x => x.item);
         const result = await aiEdit(baseImg, refs, buildPrompt(r, sel, ins, items));
         out.innerHTML = `<div style="height:12px"></div><div class="ba-wrap"></div>
           <div class="row" style="margin-top:10px"><button class="btn grow" id="keepIt">💾 שמירה</button><button class="btn sec" id="again">🔄 שוב</button></div>`;
@@ -441,7 +502,7 @@ async function geminiText(parts, json) {
   }
   throw new Error('לא נמצא מודל טקסט זמין למפתח הזה.');
 }
-async function aiPromptHelper(r, sel, ins, items, baseImg) {
+async function aiPromptHelper(r, sel, ins, items, baseImg, refs = []) {
   const c = catOf(r.cat);
   const own = R().checks[r.cat] || [];
   const checks = [...own, ...R().checks._all.filter(x => !own.some(y => y.key === x.key))];
@@ -461,8 +522,8 @@ The prompt you write MUST:
 
 Room type: ${c.name}. Real size: ${r.L ? `${r.L} x ${r.W} cm, ceiling ${r.H || '?'} cm` : 'unknown'}.
 Style: ${sel.style || 'not specified — keep the existing style unless the request implies otherwise'}.
-Products to use (attached as reference images in this order):
-${items.length ? items.map((it, i) => `${i + 2}. ${it.name} (${it.cat}${it.dims ? ', ' + it.dims : ''}${it.color ? ', ' + it.color : ''}${it.supplier ? ', supplier ' + it.supplier : ''})`).join('\n') : 'none'}
+Products / elements to use (attached as reference images in this order; image 1 is the room). You can SEE these reference images below — for each one, describe it in the prompt precisely: material, exact color, finish (matte/gloss), pattern, texture, tile/plank size and layout, legs/frame, fabric — so Gemini reproduces it exactly:
+${items.length ? items.map((it, i) => `${i + 2}. ${it.name} (${it.cat}${it.dims ? ', ' + it.dims : ''}${it.color ? ', ' + it.color : ''}${it.supplier ? ', supplier ' + it.supplier : ''}${it.note ? ', designer note: ' + it.note : ''}${it.photo ? ', photo taken by the designer' : ''})`).join('\n') : 'none'}
 Professional rules from her course (red = forbidden, orange = needs checking, green = recommendation):
 ${rules}
 
@@ -471,11 +532,13 @@ The designer's request (Hebrew): """${ins || '(no text — use the style and pro
 Return JSON only:
 {"prompt": "<the English prompt, ready to paste>",
  "prompt_he": "<a short Hebrew translation/summary of the prompt so she understands it>",
- "observations_he": ["<what you see in the photo that matters: materials, light, problems>"],
+ "observations_he": ["<what you see in the room photo that matters: materials, light, problems>", "<one line per reference element: how you described it>"],
  "warnings_he": ["<any conflict between her request and the rules or the real dimensions; empty if none>"],
  "tips_he": ["<1-3 professional design tips relevant to this request>"]}`;
   const part = (d) => { const [h, b64] = d.split(','); return { inline_data: { mime_type: h.match(/data:(.*?);/)?.[1] || 'image/jpeg', data: b64 } }; };
-  const txt = await geminiText([{ text: sys }, part(baseImg)], true);
+  const parts = [{ text: sys }, { text: 'Image 1 — the room:' }, part(baseImg)];
+  refs.forEach((x, i) => { if (x.img) { parts.push({ text: `Image ${i + 2} — ${x.item.name} (${x.item.cat}):` }); parts.push(part(x.img)); } });
+  const txt = await geminiText(parts, true);
   try { return JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { return { prompt: txt, prompt_he: '', observations_he: [], warnings_he: [], tips_he: [] }; }
 }
 function renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close) {
@@ -532,7 +595,7 @@ function buildPrompt(r, sel, ins, items) {
   if (sel.style) lines.push(`Design style: ${sel.style}.`);
   if (items.length) {
     lines.push('Use these EXACT real products. Each one is shown in a reference image after the room photo, in this order. Reproduce their color, texture, pattern and shape faithfully; do not substitute them:');
-    items.forEach((it, i) => lines.push(`${i + 1}. ${it.name} — category: ${it.cat}${it.dims ? ', size: ' + it.dims : ''}${it.color ? ', finish/color: ' + it.color : ''}${it.note ? ', note: ' + it.note : ''}`));
+    items.forEach((it, i) => lines.push(`${i + 1}. ${it.name} — category: ${it.cat}${it.dims ? ', size: ' + it.dims : ''}${it.color ? ', finish/color: ' + it.color : ''}${it.note ? ', note: ' + it.note : ''}${it.photo ? ' (photo of the real element)' : ''}`));
   }
   if (ins) lines.push(`Designer instructions (in Hebrew, follow them exactly): ${ins}`);
   return lines.join('\n');
@@ -716,7 +779,7 @@ function itemForm(it, defCat) {
     ${it ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקת המוצר</button>' : ''}`, async (b, close) => {
     const ip = $('#ip', b);
     if (it?.img) { ip.src = await getImg(it.img) || await Sync.fetchImg(it.img) || ''; ip.style.display = ip.src ? '' : 'none'; }
-    $('#pickI', b).onclick = async () => { const [f] = await pickFiles(); if (!f) return; newImg = await catalogImageData(f); ip.src = newImg; ip.style.display = ''; };
+    $('#pickI', b).onclick = async () => { const [f] = await pickPhoto(); if (!f) return; newImg = await catalogImageData(f); ip.src = newImg; ip.style.display = ''; };
     $('#ok', b).onclick = async () => {
       const name = $('#in', b).value.trim(); if (!name) return toast('צריך שם למוצר');
       const d = { name, cat: $('#ic', b).value, supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
