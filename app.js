@@ -1057,29 +1057,30 @@ function migrateRules() {
 function playIntro(force) {
   const st = S.settings;
   const list = [];
-  if (force || st.introLogo !== false) list.push({ src: 'media/intro-logo.mp4', sound: false });
-  if (force || st.introPresenter !== false) list.push({ src: 'media/intro-presenter.mp4', sound: true });
+  if (force || st.introLogo !== false) list.push('media/intro-logo.mp4');
+  if (force || st.introPresenter !== false) list.push('media/intro-presenter.mp4');
   if (!list.length) return;
   const d = document.createElement('div'); d.id = 'splash';
-  d.innerHTML = `<video playsinline webkit-playsinline preload="auto" muted></video>
-    <button class="sbtn skip">דילוג ⏭</button><button class="sbtn snd" style="display:none">🔊 הפעלת קול</button>`;
+  d.innerHTML = `<video playsinline webkit-playsinline preload="auto"></video>
+    <div class="tap" style="position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:22px;background:#f6f2ec">
+      <img src="media/logo.png" style="width:62vw;max-width:320px">
+      <button class="btn" style="font-size:18px;padding:14px 34px">▶ כניסה</button></div>
+    <button class="sbtn skip">דילוג לאפליקציה ⏭</button><button class="sbtn snd" style="display:none">🔊 הפעלת קול</button>`;
   document.body.appendChild(d);
-  const v = d.querySelector('video'), snd = d.querySelector('.snd');
+  const v = d.querySelector('video'), snd = d.querySelector('.snd'), tap = d.querySelector('.tap');
   let i = 0, done = false;
-  const end = () => { if (done) return; done = true; d.style.transition = 'opacity .4s'; d.style.opacity = 0; setTimeout(() => d.remove(), 400); };
-  const next = async () => {
-    if (i >= list.length) return end();
-    const it = list[i++]; v.src = it.src; v.muted = true; snd.style.display = 'none';
-    if (it.sound) {
-      v.muted = false;
-      try { await v.play(); return; } catch { v.muted = true; snd.style.display = ''; }
-    }
-    try { await v.play(); } catch { end(); }
+  const end = () => { if (done) return; done = true; v.pause(); d.style.transition = 'opacity .4s'; d.style.opacity = 0; setTimeout(() => d.remove(), 400); };
+  // מנגן עם קול. אם הדפדפן חוסם קול בלי נגיעה — מציגים מסך "כניסה" (נגיעה אחת מאפשרת קול לשני הסרטונים)
+  const playCur = async () => {
+    v.muted = false;
+    try { await v.play(); tap.style.display = 'none'; snd.style.display = 'none'; }
+    catch { tap.style.display = 'flex'; }
   };
+  const next = () => { if (i >= list.length) return end(); v.src = list[i++]; playCur(); };
+  tap.querySelector('button').onclick = (e) => { e.stopPropagation(); tap.style.display = 'none'; v.muted = false; v.play().catch(() => { v.muted = true; snd.style.display = ''; v.play().catch(end); }); };
   v.onended = next; v.onerror = next;
-  d.querySelector('.skip').onclick = (e) => { e.stopPropagation(); if (i < list.length && list[i - 1]?.src.includes('logo')) next(); else end(); };
+  d.querySelector('.skip').onclick = (e) => { e.stopPropagation(); end(); };
   snd.onclick = (e) => { e.stopPropagation(); v.muted = false; v.play(); snd.style.display = 'none'; };
-  setTimeout(() => { if (!done && v.paused && v.currentTime === 0) end(); }, 25000);
   next();
 }
 
