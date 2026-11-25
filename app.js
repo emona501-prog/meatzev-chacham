@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.2.1';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -805,7 +805,7 @@ function renderSettings(app) {
   app.innerHTML = `
     <div class="card"><h3>🤖 מנוע ה-AI (Google Gemini)</h3>
       <label>מפתח AI</label>
-      <div class="row"><input id="key" type="password" class="grow" value="${esc(st.apiKey)}" placeholder="מדביקים כאן את המפתח" autocomplete="off" style="flex:1">
+      <div class="row"><input id="key" type="text" class="grow" value="${esc(st.apiKey)}" placeholder="מדביקים כאן את המפתח" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" dir="ltr" style="flex:1;-webkit-text-security:disc">
         <button class="btn sec sm" id="showK">👁</button></div>
       <div class="muted" style="margin-top:6px">המפתח נשמר רק בטלפון הזה. מקבלים אותו ב-aistudio.google.com ← Get API key. להדמיות צריך להפעיל חיוב בחשבון גוגל (מומלץ עם תקרת הוצאה).</div>
       <label>שם המודל</label><input id="model" value="${esc(st.model || DEFAULT_MODEL)}" dir="ltr">
@@ -842,7 +842,7 @@ function renderSettings(app) {
       <b>אייפון:</b> רק ב-Safari ← כפתור השיתוף ⬆️ ← "הוסף למסך הבית".</div></div>
     <div class="muted" style="text-align:center">מעצב חכם · גרסה ${APP_VERSION} · חי אפליקציות</div>`;
   $('#key').onchange = e => { st.apiKey = e.target.value.trim(); save(); toast('המפתח נשמר'); };
-  $('#showK').onclick = () => { const k = $('#key'); k.type = k.type === 'password' ? 'text' : 'password'; };
+  $('#showK').onclick = () => { const k = $('#key'); k.style.webkitTextSecurity = k.style.webkitTextSecurity === 'none' ? 'disc' : 'none'; };
   $('#model').onchange = e => { st.model = e.target.value.trim() || DEFAULT_MODEL; save(); };
   $('#pn').onchange = e => { st.printNotes = e.target.checked; save(); };
   $('#test').onclick = testKey;
