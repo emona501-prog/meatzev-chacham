@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -1057,8 +1057,8 @@ function migrateRules() {
 function playIntro(force) {
   const st = S.settings;
   const list = [];
-  if (force || st.introLogo !== false) list.push('media/intro-logo.mp4');
-  if (force || st.introPresenter !== false) list.push('media/intro-presenter.mp4');
+  if (force || st.introLogo !== false) list.push('media/intro-logo.mp4?v=' + APP_VERSION);
+  if (force || st.introPresenter !== false) list.push('media/intro-presenter.mp4?v=' + APP_VERSION);
   if (!list.length) return;
   const d = document.createElement('div'); d.id = 'splash';
   d.innerHTML = `<video playsinline webkit-playsinline preload="auto"></video>
