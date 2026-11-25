@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.6';
+const APP_VERSION = '0.6.7';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -478,7 +478,9 @@ function studio(p, r, fromDesign) {
 }
 
 // ---------- עוזר הנחיות (מודל טקסט+ראייה, בשכבה החינמית) ----------
-const TEXT_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+const TEXT_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest'];
+// כשגוגל עונה "המודל הוחלף — השתמשו ב-models/X", לוקחים את X אוטומטית
+function suggestedModel(msg) { const m = /use models\/([\w.\-]+)/i.exec(msg || ''); return m ? m[1] : null; }
 // fetch עם הגבלת זמן — כדי שבקשה תקועה לא תתקע את כל האפליקציה
 // בקשה "פשוטה" בלי כותרות מיוחדות — עוקפת חסימות של חלק מהמסננים/רשתות
 async function gFetch(url, key, body, ms) {
@@ -505,6 +507,7 @@ async function geminiText(parts, json, onStatus) {
   const key = S.settings.apiKey.trim();
   const models = [...new Set([S.settings.textModel, ...TEXT_MODELS].filter(Boolean))];
   AI_LOG = [];
+  const addModel = (m) => { if (m && !models.includes(m)) models.push(m); };
   let busy = false, noFree = 0, wait = 0;
   for (let round = 0; round < 4; round++) {
     if (round) {
@@ -528,7 +531,7 @@ async function geminiText(parts, json, onStatus) {
       AI_LOG.push({ model, status: res.status, msg: msg.slice(0, 300) });
       const rd = (j?.error?.details || []).find(d => d.retryDelay)?.retryDelay;
       if (rd) wait = Math.max(wait, parseInt(rd) || 0);
-      if (res.status === 404) continue;
+      if (res.status === 404) { addModel(suggestedModel(msg)); if (S.settings.textModel === model) S.settings.textModel = ''; continue; }
       if (res.status === 400 && /API key/i.test(msg)) throw new Error('מפתח ה-AI לא תקין.');
       if (res.status === 403) throw new Error('המפתח חסום לשירות הזה (403). צריך לבדוק ב-AI Studio שהמפתח שייך לפרויקט עם Gemini API פעיל.');
       if (res.status === 429 && /limit:\s*0\b|free_tier.*limit.*\b0\b/i.test(msg)) { noFree++; continue; } // אין בכלל מכסה חינמית במודל הזה
@@ -662,7 +665,11 @@ async function aiEdit(baseDataURL, refs, prompt) {
     if (res.status === 400 && /API key/i.test(m)) throw new Error('מפתח ה-AI לא תקין. בודקים אותו בהגדרות.');
     if (res.status === 403) throw new Error('למפתח אין הרשאה למודל הזה. בודקים בהגדרות או ב-Google AI Studio.');
     if (res.status === 429) throw new Error('המכסה נגמרה או שצריך להפעיל חיוב בחשבון גוגל. מודלי תמונה דורשים חיוב.');
-    if (res.status === 404) throw new Error(`המודל "${model}" לא נמצא. בודקים את שם המודל בהגדרות.`);
+    if (res.status === 404) {
+      const sm = suggestedModel(m);
+      if (sm && sm !== model && !aiEdit._retry) { S.settings.model = sm; save(); aiEdit._retry = true; try { return await aiEdit(baseDataURL, refs, prompt); } finally { aiEdit._retry = false; } }
+      throw new Error(`המודל "${model}" לא נמצא. בודקים את שם המודל בהגדרות.`);
+    }
     throw new Error('שגיאה מהשרת: ' + (m || res.status));
   }
   const ps = j?.candidates?.[0]?.content?.parts || [];
@@ -1180,12 +1187,13 @@ function renderSettings(app) {
 async function testKey() {
   const key = S.settings.apiKey; if (!key) return toast('קודם מדביקים מפתח');
   modal('בדיקת חיבור ל-AI', `<div class="muted">שולח הודעה קצרה לכל מודל חינמי ובודק מי עונה…</div><div id="tk" style="margin-top:10px"></div>`, async (b) => {
-    const box = b.querySelector('#tk'); let okAny = false;
-    for (const m of TEXT_MODELS) {
+    const box = b.querySelector('#tk'); let okAny = false; const list = [...TEXT_MODELS];
+    for (let mi = 0; mi < list.length; mi++) { const m = list[mi];
       const row = document.createElement('div'); row.className = 'rule'; row.innerHTML = `<span class="dot"></span><div dir="ltr" style="text-align:left"><b>${m}</b> …</div>`; box.appendChild(row);
       try {
         const r = await gFetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, key.trim(), JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK' }] }], generationConfig: { maxOutputTokens: 20 } }), 20000);
         const j = await r.json().catch(() => ({}));
+        if (r.status === 404) { const sm = suggestedModel(j?.error?.message); if (sm && !list.includes(sm)) list.push(sm); }
         const good = r.ok && j?.candidates; if (good) { if (!okAny) { S.settings.textModel = m; save(); } okAny = true; }
         row.className = 'rule ' + (good ? 'green' : 'red'); row.querySelector('.dot').className = 'dot ' + (good ? 'green' : 'red');
         row.querySelector('div').innerHTML = `<b>${m}</b> — ${good ? '✓ עובד' : esc(r.status + ' ' + (j?.error?.message || '').slice(0, 220))}`;
