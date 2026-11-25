@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.5';
+const APP_VERSION = '0.7.6';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -935,6 +935,7 @@ async function renderCatalog(app) {
     <div class="muted" style="margin-bottom:10px">מוצרים אמיתיים מהשוק. ה-AI משתמש בתמונה של המוצר ולא ממציא משהו אחר.
       ${S.sync?.code ? '<br>🤝 המאגר משותף — כל מה שמוסיפים כאן מתעדכן אצל כל השותפים.' : ''}</div>
     ${!Sync.ok() ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div><b>הקטלוג לא מחובר למאגר המשותף.</b> מה שמוסיפים כאן נשאר רק בטלפון הזה. מתחברים בהגדרות ← מאגר משותף (עם קוד ההזמנה).</div></div>`
+      : S.sync.err ? `<div class="rule red" style="margin-bottom:10px"><span class="dot red"></span><div><b>הסנכרון לא עובד כרגע:</b> ${esc(S.sync.err)}</div></div>`
       : (() => { const u = S.catalog.filter(x => !x.synced).length; return u ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div>⚠️ ${u} מוצרים עוד לא עלו למאגר המשותף. <button class="btn sm" id="syncNow3">🔄 להעלות עכשיו</button></div></div>` : ''; })()}
     <button class="btn full" id="sortIn" style="margin-bottom:10px;background:linear-gradient(135deg,#8a5a3c,#b0764e)">📥 זריקת תמונות למיון אוטומטי (AI)</button>
     ${nPend ? `<button class="btn sec full" id="resume" style="margin-bottom:10px">⏳ ${nPend} תמונות ממתינות למיון — המשך מיון</button>` : ''}
@@ -1234,7 +1235,11 @@ const Sync = {
     const url = this.base() + path + (path.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(S.sync.apiKey);
     const r = await fetch(url, { ...opt, headers: { 'Content-Type': 'application/json' } });
     if (r.status === 404) return null;
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j?.error?.message || ('שגיאת סנכרון ' + r.status)); }
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({})); const m = j?.error?.message || '';
+      if (r.status === 429 || /quota|exhausted/i.test(m)) throw new Error('נגמרה המכסה היומית החינמית של המאגר (Firebase). היא מתאפסת כל יום בערך ב-10:00 בבוקר. מה שהוספתם שמור בטלפון ויעלה אוטומטית אחר כך.');
+      throw new Error(m || ('שגיאת סנכרון ' + r.status));
+    }
     return r.json();
   },
   meta(it) { const { img, updated, ...rest } = it; return rest; },
@@ -1262,6 +1267,16 @@ const Sync = {
     try { const d = await this.req(`/imgs/${id}`); const v = d?.fields?.data?.stringValue; if (v) { imgCache[id] = v; await DB.set(id, v); } return v || ''; }
     catch { return ''; }
   },
+  async changedSince(ts) {
+    const parent = `projects/${S.sync.projectId}/databases/(default)/documents/ws/${S.sync.code}`;
+    const r = await fetch(`https://firestore.googleapis.com/v1/${parent}:runQuery?key=${encodeURIComponent(S.sync.apiKey)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'items' }], where: { fieldFilter: { field: { fieldPath: 'updated' }, op: 'GREATER_THAN', value: { integerValue: String(Math.max(0, Math.floor(ts))) } } } } })
+    });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error((Array.isArray(j) ? j[0] : j)?.error?.message || ('שגיאת סנכרון ' + r.status)); }
+    const arr = await r.json();
+    return arr.map(x => x.document).filter(Boolean);
+  },
   async listItems() {
     const out = []; let token = '';
     do {
@@ -1279,11 +1294,14 @@ const Sync = {
       const rulesGot = await this.syncRules();
       const aiGot = await this.syncAI();
       if (aiGot) toast('מפתח ה-AI התקבל מהמאגר המשותף ✓');
-      const remote = await this.listItems();
-      const seen = new Set(); let got = 0, sent = 0;
+      // קוראים מהענן רק מה שהשתנה מאז הפעם הקודמת (חוסך קריאות — במכסה החינמית יש 50,000 קריאות ביום)
+      const full = !S.sync.cursor || manual === 'full' || Date.now() - (S.sync.fullAt || 0) > 24 * 3600e3;
+      const remote = full ? await this.listItems() : await this.changedSince(S.sync.cursor - 15 * 60e3);
+      let got = 0, sent = 0, maxU = S.sync.cursor || 0;
+      const seen = new Set();
       for (const doc of remote) {
         const id = doc.name.split('/').pop(); seen.add(id);
-        const f = doc.fields || {}; const rUpd = +(f.updated?.integerValue || 0);
+        const f = doc.fields || {}; const rUpd = +(f.updated?.integerValue || 0); if (rUpd > maxU) maxU = rUpd;
         const local = S.catalog.find(x => x.id === id);
         if (f.deleted?.booleanValue) { if (local) { await delImg(local.img); S.catalog = S.catalog.filter(x => x !== local); got++; } continue; }
         if (!local || rUpd > (local.updated || 0)) {
@@ -1293,12 +1311,14 @@ const Sync = {
           got++;
         } else if (local && (local.updated || 0) > rUpd) { await this.pushItem(local, await getImg(local.img)); sent++; }
       }
-      for (const it of S.catalog.filter(x => !seen.has(x.id))) { await this.pushItem(it, await getImg(it.img)); sent++; }
+      // מה שעוד לא עלה מהטלפון הזה (בסנכרון מלא: גם מה שחסר בענן)
+      for (const it of S.catalog.filter(x => !x.synced || (full && !seen.has(x.id)))) { await this.pushItem(it, await getImg(it.img)); if (it.synced) sent++; }
+      S.sync.cursor = maxU; if (full) S.sync.fullAt = Date.now(); S.sync.err = '';
       S.sync.last = Date.now(); save();
       if (manual || got) toast(`הסנכרון הושלם${got ? ` · התקבלו ${got} עדכונים` : ''}${sent ? ` · נשלחו ${sent}` : ''}`);
       if (rulesGot && manual) toast('הכללים עודכנו מהמאגר');
       if ((got && V.tab === 'catalog') || ((rulesGot || aiGot) && V.tab !== 'projects')) render();
-    } catch (e) { if (manual) toast('הסנכרון נכשל: ' + e.message, 4500); }
+    } catch (e) { S.sync.err = e.message; save(); if (manual) toast('הסנכרון נכשל: ' + e.message, 6000); if (V.tab === 'catalog') render(); }
     finally { this.busy = false; }
   },
   async pushRules() {
@@ -1498,7 +1518,7 @@ function renderSettings(app) {
       location.href = 'https://wa.me/?text=' + encodeURIComponent(txt);
     };
     $('#copyInv').onclick = async () => { try { await navigator.clipboard.writeText(Sync.inviteCode()); toast('הקוד הועתק'); } catch { prompt('העתיקו את הקוד:', Sync.inviteCode()); } };
-    $('#syncNow2').onclick = () => Sync.run(true);
+    $('#syncNow2').onclick = () => Sync.run('full');
     $('#diag').onclick = async () => {
       const o = $('#diagOut'); o.innerHTML = '<div class="muted">בודק…</div>';
       try {
