@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.4';
+const APP_VERSION = '0.6.5';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -479,6 +479,13 @@ function studio(p, r, fromDesign) {
 
 // ---------- עוזר הנחיות (מודל טקסט+ראייה, בשכבה החינמית) ----------
 const TEXT_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+// fetch עם הגבלת זמן — כדי שבקשה תקועה לא תתקע את כל האפליקציה
+async function fetchT(url, opts, ms) {
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ac.signal }); }
+  catch (e) { if (e.name === 'AbortError') { const er = new Error('timeout'); er.timeout = true; throw er; } throw e; }
+  finally { clearTimeout(t); }
+}
 // יומן ניסיונות אחרון — כדי לראות מה גוגל באמת עונה
 let AI_LOG = [];
 function aiLogHtml() {
@@ -500,11 +507,15 @@ async function geminiText(parts, json, onStatus) {
       onStatus && onStatus(`שולח ל-${model}…`);
       let res;
       try {
-        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        res = await fetchT(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
           body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } })
-        });
-      } catch (e) { AI_LOG.push({ model, status: 'net', msg: String(e.message || e) }); throw new Error('אין חיבור לאינטרנט.'); }
+        }, 75000);
+      } catch (e) {
+        AI_LOG.push({ model, status: e.timeout ? 'timeout' : 'net', msg: e.timeout ? 'no answer in 75s' : String(e.message || e) });
+        if (e.timeout) { busy = true; continue; }
+        throw new Error('אין חיבור לאינטרנט.');
+      }
       const j = await res.json().catch(() => ({}));
       const msg = j?.error?.message || '';
       AI_LOG.push({ model, status: res.status, msg: msg.slice(0, 300) });
@@ -1166,12 +1177,12 @@ async function testKey() {
     for (const m of TEXT_MODELS) {
       const row = document.createElement('div'); row.className = 'rule'; row.innerHTML = `<span class="dot"></span><div dir="ltr" style="text-align:left"><b>${m}</b> …</div>`; box.appendChild(row);
       try {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.trim() }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK' }] }] }) });
+        const r = await fetchT(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.trim() }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK' }] }], generationConfig: { maxOutputTokens: 20 } }) }, 20000);
         const j = await r.json().catch(() => ({}));
         const good = r.ok && j?.candidates; if (good) { if (!okAny) { S.settings.textModel = m; save(); } okAny = true; }
         row.className = 'rule ' + (good ? 'green' : 'red'); row.querySelector('.dot').className = 'dot ' + (good ? 'green' : 'red');
         row.querySelector('div').innerHTML = `<b>${m}</b> — ${good ? '✓ עובד' : esc(r.status + ' ' + (j?.error?.message || '').slice(0, 220))}`;
-      } catch (e) { row.querySelector('div').innerHTML = `<b>${m}</b> — אין חיבור`; }
+      } catch (e) { row.className = 'rule red'; row.querySelector('.dot').className = 'dot red'; row.querySelector('div').innerHTML = `<b>${m}</b> — ${e.timeout ? 'לא ענה תוך 20 שניות' : 'אין חיבור'}`; }
     }
     const s2 = document.createElement('div'); s2.style.marginTop = '10px'; s2.innerHTML = okAny ? '<b>✓ יש מודל חינמי שעובד — הכנת ההנחיה תשתמש בו.</b>' : '<b>אף מודל לא ענה. צלמו את המסך הזה ושלחו.</b>'; box.appendChild(s2);
   });
