@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.2';
+const APP_VERSION = '0.7.3';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -940,7 +940,7 @@ async function renderCatalog(app) {
       <button class="btn" id="bulk">📥 הוספת הרבה תמונות</button>
       <button class="btn sec" id="newI">+ מוצר עם פרטים</button></div>
     ${cat ? '' : '<div class="muted" style="margin-bottom:10px">טיפ: בוחרים קודם קטגוריה, ואז כל התמונות שמוסיפים נכנסות אליה.</div>'}
-    <div class="thumbs" id="clist"></div>
+    <div class="swatches" id="clist"></div>
     ${list.length ? '' : '<div class="empty"><b>🧱</b>אין מוצרים בקטגוריה הזו עדיין.</div>'}`;
   app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => go({ catFilter: c.dataset.c }));
   $('#newI').onclick = () => itemForm(null, cat);
@@ -950,8 +950,8 @@ async function renderCatalog(app) {
   if ($('#syncNow')) $('#syncNow').onclick = () => Sync.run(true);
   const cl = $('#clist');
   for (const it of list) {
-    const d = document.createElement('div'); d.className = 't';
-    d.innerHTML = `<img loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:11px;padding:14px 5px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}${it.model ? `<br><span dir="ltr" style="opacity:.85">${esc(it.model)}</span>` : ''}</div>`;
+    const d = document.createElement('div'); d.className = 'sw';
+    d.innerHTML = `<div class="c"><img loading="lazy"></div><div class="n">${esc(it.name)}</div>${it.model ? `<div class="m" dir="ltr">${esc(it.model)}</div>` : ''}`;
     cl.appendChild(d);
     d.onclick = () => itemForm(it);
     getImg(it.img).then(src => { d.querySelector('img').src = src || 'icon.svg'; if (!src && it.img) Sync.fetchImg(it.img).then(s2 => { if (s2) d.querySelector('img').src = s2; }); });
