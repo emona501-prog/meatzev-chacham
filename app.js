@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.1';
+const APP_VERSION = '0.6.2';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -478,28 +478,35 @@ function studio(p, r, fromDesign) {
 }
 
 // ---------- עוזר הנחיות (מודל טקסט+ראייה, בשכבה החינמית) ----------
-const TEXT_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
-async function geminiText(parts, json) {
-  const key = S.settings.apiKey.trim(); let lastErr = '';
-  const models = [S.settings.textModel, ...TEXT_MODELS].filter(Boolean);
-  for (const model of [...new Set(models)]) {
-    let res;
-    try {
-      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } })
-      });
-    } catch { throw new Error('אין חיבור לאינטרנט.'); }
-    const j = await res.json().catch(() => ({}));
-    if (res.status === 404) { lastErr = 'model'; continue; }
-    if (!res.ok) {
-      if (res.status === 429) throw new Error('המכסה היומית החינמית נגמרה. אפשר לנסות שוב מחר, או להוסיף כרטיס.');
-      if (res.status === 400 && /API key/i.test(j?.error?.message || '')) throw new Error('מפתח ה-AI לא תקין.');
-      throw new Error('שגיאה מהשרת: ' + (j?.error?.message || res.status));
+const TEXT_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+async function geminiText(parts, json, onStatus) {
+  const key = S.settings.apiKey.trim();
+  const models = [...new Set([S.settings.textModel, ...TEXT_MODELS].filter(Boolean))];
+  let busy = false;
+  for (let round = 0; round < 3; round++) {
+    if (round) { onStatus && onStatus(`השרתים של גוגל עמוסים כרגע. מנסה שוב (${round}/2)…`); await new Promise(r => setTimeout(r, 4000 * round)); }
+    for (const model of models) {
+      let res;
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } })
+        });
+      } catch { throw new Error('אין חיבור לאינטרנט.'); }
+      const j = await res.json().catch(() => ({}));
+      const msg = j?.error?.message || '';
+      if (res.status === 404) continue;                                   // מודל לא קיים — מנסים את הבא
+      if (res.status === 503 || res.status === 500 || /high demand|overloaded|unavailable/i.test(msg)) { busy = true; continue; } // עומס — מנסים מודל אחר
+      if (res.status === 429) {
+        if (/quota|exhausted|limit/i.test(msg)) { busy = true; continue; } // מכסה של מודל אחד — לפעמים במודל אחר יש עוד מכסה
+      }
+      if (res.status === 400 && /API key/i.test(msg)) throw new Error('מפתח ה-AI לא תקין.');
+      if (!res.ok) throw new Error('שגיאה מהשרת: ' + (msg || res.status));
+      S.settings.textModel = model; save();
+      return (j?.candidates?.[0]?.content?.parts || []).map(x => x.text || '').join('');
     }
-    S.settings.textModel = model; save();
-    return (j?.candidates?.[0]?.content?.parts || []).map(x => x.text || '').join('');
   }
+  if (busy) throw new Error('השרתים של גוגל עמוסים כרגע, או שהמכסה היומית החינמית נגמרה. זה בדרך כלל זמני — נסו שוב בעוד כמה דקות.');
   throw new Error('לא נמצא מודל טקסט זמין למפתח הזה.');
 }
 async function aiPromptHelper(r, sel, ins, items, baseImg, refs = []) {
@@ -538,7 +545,7 @@ Return JSON only:
   const part = (d) => { const [h, b64] = d.split(','); return { inline_data: { mime_type: h.match(/data:(.*?);/)?.[1] || 'image/jpeg', data: b64 } }; };
   const parts = [{ text: sys }, { text: 'Image 1 — the room:' }, part(baseImg)];
   refs.forEach((x, i) => { if (x.img) { parts.push({ text: `Image ${i + 2} — ${x.item.name} (${x.item.cat}):` }); parts.push(part(x.img)); } });
-  const txt = await geminiText(parts, true);
+  const txt = await geminiText(parts, true, (m) => { const o = document.querySelector('#out .muted'); if (o) o.textContent = m; });
   try { return JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { return { prompt: txt, prompt_he: '', observations_he: [], warnings_he: [], tips_he: [] }; }
 }
 function renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close) {
