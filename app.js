@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.3';
+const APP_VERSION = '0.7.4';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -601,7 +601,8 @@ function aiLogHtml() {
   if (!AI_LOG.length) return '';
   return `<details style="margin-top:8px"><summary class="muted">פרטים טכניים (לצלם מסך ולשלוח)</summary><div dir="ltr" style="font-size:12px;text-align:left;white-space:pre-wrap;word-break:break-word">${AI_LOG.map(l => esc(`${l.model}: ${l.status} ${l.msg}`)).join('\n')}</div></details>`;
 }
-async function geminiText(parts, json, onStatus) {
+let AI_LAST = null;
+async function geminiText(parts, json, onStatus, opts = {}) {
   const key = S.settings.apiKey.trim();
   const models = [...new Set([...(tier() === 'pro' ? ['gemini-3.8-flash'] : []), S.settings.textModel, ...TEXT_MODELS].filter(Boolean))];
   AI_LOG = [];
@@ -623,7 +624,7 @@ async function geminiText(parts, json, onStatus) {
       let res;
       try {
         res = await gFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, key,
-          JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } }), 45000);
+          JSON.stringify({ contents: [{ role: 'user', parts }], ...(opts.tools ? { tools: opts.tools } : {}), generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } }), opts.timeout || 45000);
       } catch (e) {
         AI_LOG.push({ model, status: e.timeout ? 'timeout' : 'net', msg: e.timeout ? 'no answer in 45s' : String(e.message || e) });
         if (e.timeout) { busy = true; continue; }
@@ -643,7 +644,7 @@ async function geminiText(parts, json, onStatus) {
       if (!res.ok) throw new Error('שגיאה מהשרת: ' + (msg || res.status));
       const out = (j?.candidates?.[0]?.content?.parts || []).map(x => x.text || '').join('');
       if (!out) { AI_LOG[AI_LOG.length - 1].msg = 'empty: ' + (j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || ''); continue; }
-      S.settings.textModel = model; save();
+      AI_LAST = j; if (!opts.tools) { S.settings.textModel = model; save(); }
       return out;
     }
     if (noFree && !busy) break;
@@ -925,17 +926,22 @@ function catForm(old) {
 async function renderCatalog(app) {
   setHeader('קטלוג מוצרים', false);
   const cat = V.catFilter;
-  const list = S.catalog.filter(x => !cat || x.cat === cat).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const nRev = S.catalog.filter(x => x.review).length, nPend = S.catalog.filter(x => x.pending).length;
+  const list = S.catalog.filter(x => !cat || (cat === '__review' ? x.review : x.cat === cat)).sort((a, b) => (b.updated || 0) - (a.updated || 0));
   const count = (c) => S.catalog.filter(x => x.cat === c).length;
   app.innerHTML = `
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2>
       ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄 סנכרון</button>` : ''}</div>
     <div class="muted" style="margin-bottom:10px">מוצרים אמיתיים מהשוק. ה-AI משתמש בתמונה של המוצר ולא ממציא משהו אחר.
       ${S.sync?.code ? '<br>🤝 המאגר משותף — כל מה שמוסיפים כאן מתעדכן אצל כל השותפים.' : ''}</div>
+    <button class="btn full" id="sortIn" style="margin-bottom:10px;background:linear-gradient(135deg,#8a5a3c,#b0764e)">📥 זריקת תמונות למיון אוטומטי (AI)</button>
+    ${nPend ? `<button class="btn sec full" id="resume" style="margin-bottom:10px">⏳ ${nPend} תמונות ממתינות למיון — המשך מיון</button>` : ''}
     <div class="chips" style="margin-bottom:12px"><span class="chip ${!cat ? 'on' : ''}" data-c="">הכול (${S.catalog.length})</span>
+      ${nRev ? `<span class="chip ${cat === '__review' ? 'on' : ''}" data-c="__review" style="border-color:var(--orange);color:${cat === '__review' ? '#fff' : 'var(--orange)'};${cat === '__review' ? 'background:var(--orange)' : ''};font-weight:700">⚠️ לבירור (${nRev})</span>` : ''}
       ${R().catCats.map(c => `<span class="chip ${cat === c ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}${count(c) ? ` (${count(c)})` : ''}</span>`).join('')}
       <span class="chip" id="addCat" style="border-style:dashed;font-weight:700">＋ קטגוריה חדשה</span></div>
-    ${cat ? `<div class="row" style="margin-bottom:10px"><span class="muted grow">קטגוריה: <b>${esc(cat)}</b></span><button class="btn sec sm" id="editCat">✏️ עריכת הקטגוריה</button></div>` : ''}
+    ${cat && cat !== '__review' ? `<div class="row" style="margin-bottom:10px"><span class="muted grow">קטגוריה: <b>${esc(cat)}</b></span><button class="btn sec sm" id="editCat">✏️ עריכת הקטגוריה</button></div>` : ''}
+    ${cat === '__review' ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div>אלה מוצרים שה-AI לא היה בטוח בהם. לוחצים על כל אחד, בודקים, מתקנים ושומרים — והסימון יורד.</div></div>` : ''}
     <div class="grid2" style="margin-bottom:12px">
       <button class="btn" id="bulk">📥 הוספת הרבה תמונות</button>
       <button class="btn sec" id="newI">+ מוצר עם פרטים</button></div>
@@ -943,15 +949,17 @@ async function renderCatalog(app) {
     <div class="swatches" id="clist"></div>
     ${list.length ? '' : '<div class="empty"><b>🧱</b>אין מוצרים בקטגוריה הזו עדיין.</div>'}`;
   app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => go({ catFilter: c.dataset.c }));
-  $('#newI').onclick = () => itemForm(null, cat);
-  $('#bulk').onclick = () => bulkAdd(cat);
+  $('#newI').onclick = () => itemForm(null, cat === '__review' ? '' : cat);
+  $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat);
+  $('#sortIn').onclick = () => sortInbox();
+  if ($('#resume')) $('#resume').onclick = () => resumeSort();
   $('#addCat').onclick = () => catForm(null);
   if ($('#editCat')) $('#editCat').onclick = () => catForm(cat);
   if ($('#syncNow')) $('#syncNow').onclick = () => Sync.run(true);
   const cl = $('#clist');
   for (const it of list) {
     const d = document.createElement('div'); d.className = 'sw';
-    d.innerHTML = `<div class="c"><img loading="lazy"></div><div class="n">${esc(it.name)}</div>${it.model ? `<div class="m" dir="ltr">${esc(it.model)}</div>` : ''}`;
+    d.innerHTML = `<div class="c"><img loading="lazy"></div>${it.review ? `<span class="flag">${it.pending ? '⏳' : '!'}</span>` : ''}<div class="n">${esc(it.name)}</div>${it.model ? `<div class="m" dir="ltr">${esc(it.model)}</div>` : ''}`;
     cl.appendChild(d);
     d.onclick = () => itemForm(it);
     getImg(it.img).then(src => { d.querySelector('img').src = src || 'icon.svg'; if (!src && it.img) Sync.fetchImg(it.img).then(s2 => { if (s2) d.querySelector('img').src = s2; }); });
@@ -1016,6 +1024,92 @@ CRITICAL: never invent a model number, brand or price. Only copy them if they ar
   return j;
 }
 
+// =====================================================================
+// 📥 מיון אוטומטי — זורקים את כל התמונות למקום אחד, ה-AI ממיין, ומה שלא בטוח מסומן "לבירור"
+async function aiWebModel(it, dataURL, onStatus) {
+  // חיפוש בגוגל (Grounding) — מציע התאמות אפשריות עם קישורים. לא מחליט לבד.
+  const small = await shrinkData(dataURL, 768, 0.8); const [h, b64] = small.split(',');
+  const q = `This photo shows: ${it.name}${it.color ? ', ' + it.color : ''}${it.supplier ? ', brand ' + it.supplier : ''}${it.model ? ', code ' + it.model : ''} (category: ${it.cat}).
+Search the web (prefer Israeli suppliers and shops, e.g. Negev Ceramics, Mody, Halamish, Ceramica Ltd, Hamat, Kirsch, Tambour, Nirlat and similar) for the commercial product that best matches this photo.
+Reply ONLY with JSON (no markdown): {"matches":[{"name": Hebrew or original product name, "supplier": "...", "model": exact model/SKU as shown on the supplier site, "url": product page url, "why": short Hebrew reason}], "sure": true|false}
+Max 3 matches. If you cannot find a convincing match, return {"matches":[], "sure": false}. Never invent model numbers or urls.`;
+  const txt = await geminiText([{ text: q }, { inline_data: { mime_type: h.match(/data:(.*?);/)?.[1] || 'image/jpeg', data: b64 } }], false, onStatus, { tools: [{ google_search: {} }], timeout: 60000 });
+  let j = {}; try { j = JSON.parse((txt.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch {}
+  const links = (AI_LAST?.candidates?.[0]?.groundingMetadata?.groundingChunks || []).map(c => c.web).filter(Boolean).map(w => ({ title: w.title || '', url: w.uri }));
+  return { matches: (j.matches || []).filter(m => m && m.name).slice(0, 3), sure: !!j.sure, links: links.slice(0, 5) };
+}
+async function sortOne(it, data, useWeb, onStatus) {
+  const reasons = [];
+  const a = await aiIdentify(data, onStatus);
+  Object.assign(it, { name: a.name || it.name, cat: a.category || 'אחר', model: a.model || '', supplier: a.brand || '', dims: a.dims || '', color: a.color || '', price: a.price || '', note: [a.material, a.note].filter(Boolean).join(' · '), pending: false });
+  if (a.confidence !== 'high') reasons.push(a.confidence === 'low' ? 'הזיהוי לא ודאי — לבדוק מה זה בדיוק' : 'זיהוי סביר אבל לא בטוח — לוודא');
+  if (!it.model && useWeb) {
+    try {
+      onStatus && onStatus('🔎 מחפש את הדגם ברשת…');
+      const w = await aiWebModel(it, data, onStatus);
+      it.web = w;
+      if (w.matches.length) reasons.push(`נמצאו ${w.matches.length} התאמות אפשריות ברשת — לבחור את הנכונה ולוודא בקישור`);
+      else reasons.push('לא נמצא דגם ברשת — לברר בחנות / אצל הספק');
+    } catch { reasons.push('חסר מספר דגם (החיפוש ברשת לא הצליח כרגע)'); }
+  } else if (!it.model) reasons.push('חסר מספר דגם — לברר אצל הספק או לצלם את התווית');
+  it.review = reasons.length > 0; it.reviewWhy = reasons;
+  it.updated = Date.now();
+}
+function sortInbox() {
+  modal('📥 מיון אוטומטי', `
+    <div class="muted">זורקים לכאן את כל התמונות — מכל הקטגוריות יחד. ה-AI יזהה כל תמונה, ישים אותה בקטגוריה, ייתן שם ודגם.
+      מה שהוא לא בטוח בו יסומן <b style="color:var(--orange)">⚠️ לבירור</b> עם הסבר מה לבדוק.</div>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" id="sWeb" checked style="width:auto"> לחפש מספר דגם ברשת כשהוא לא כתוב בתמונה</label>
+    <div class="muted" style="font-size:12px">התמונות לא הולכות לאיבוד: כל תמונה נשמרת מיד, גם אם הזיהוי נכשל (אז אפשר להמשיך מאוחר יותר).</div>
+    <div class="grid2" style="margin-top:12px"><button class="btn" id="sCam">📷 צילום</button><button class="btn" id="sGal">🖼️ מהגלריה</button></div>
+    <div id="sProg" style="margin-top:12px"></div>`, (b, close) => {
+    const run = async (camera) => {
+      if (!S.settings.apiKey) return toast('צריך מפתח AI בהגדרות');
+      const files = await pickFiles(!camera, camera); if (!files.length) return;
+      const useWeb = $('#sWeb', b).checked;
+      const pr = $('#sProg', b); b.querySelectorAll('button').forEach(x => x.disabled = true);
+      await ensureHashes();
+      const queue = []; let dups = 0;
+      for (let i = 0; i < files.length; i++) {
+        pr.innerHTML = `<div class="muted">שומר תמונה ${i + 1} מתוך ${files.length}…</div>`;
+        const data = await catalogImageData(files[i]); const ph = await imgHash(data);
+        if (await findDuplicate(ph)) { dups++; continue; }
+        const it = { id: uid(), name: 'ממתין למיון', cat: 'אחר', supplier: '', model: '', dims: '', color: '', price: '', link: '', note: '', ph, pending: true, review: true, reviewWhy: ['עוד לא מוין'], img: await putImg(data), updated: Date.now() };
+        S.catalog.push(it); Sync.pushItem(it, data); queue.push([it, data]);
+      }
+      save();
+      await sortQueue(queue, useWeb, pr, dups);
+      b.querySelectorAll('button').forEach(x => x.disabled = false);
+      render();
+    };
+    $('#sCam', b).onclick = () => run(true);
+    $('#sGal', b).onclick = () => run(false);
+  });
+}
+async function sortQueue(queue, useWeb, pr, dups = 0) {
+  let ok = 0, rev = 0, fail = 0;
+  for (let i = 0; i < queue.length; i++) {
+    const [it, data] = queue[i];
+    const line = (m) => pr.innerHTML = `<div class="rule"><span class="dot"></span><div><b>ממיין ${i + 1} מתוך ${queue.length}</b><br><span class="muted">${esc(m)}</span></div></div>`;
+    line('מזהה…');
+    try { await sortOne(it, data, useWeb, line); ok++; if (it.review) rev++; Sync.pushItem(it); save(); }
+    catch (e) { fail++; it.reviewWhy = ['המיון האוטומטי לא הצליח (' + e.message + ') — אפשר ללחוץ "המשך מיון" מאוחר יותר']; save(); if (/מפתח|חיוב|403/.test(e.message)) break; }
+  }
+  pr.innerHTML = `<div class="rule green"><span class="dot green"></span><div><b>סיום!</b> מוינו ${ok} תמונות.
+    ${rev ? `<br>⚠️ ${rev} מסומנות לבירור — בקטלוג לוחצים על "⚠️ לבירור".` : ''}
+    ${fail ? `<br>⏳ ${fail} לא מוינו (עומס / תקלה) — נשמרו, ואפשר "המשך מיון" אחר כך.` : ''}
+    ${dups ? `<br>🔁 ${dups} דולגו כי כבר קיימות בקטלוג.` : ''}</div></div>`;
+}
+async function resumeSort() {
+  const pend = S.catalog.filter(x => x.pending);
+  if (!pend.length) return toast('אין תמונות שממתינות למיון');
+  modal('⏳ המשך מיון', `<div id="sProg"></div>`, async (b) => {
+    const queue = [];
+    for (const it of pend) { const d = await getImg(it.img) || await Sync.fetchImg(it.img); if (d) queue.push([it, d]); }
+    await sortQueue(queue, true, $('#sProg', b)); render();
+  });
+}
+
 async function bulkAdd(cat) {
   if (!cat) {
     return modal('לאיזו קטגוריה?', `<div class="chips">${R().catCats.map(c => `<span class="chip" data-c="${esc(c)}">${esc(c)}</span>`).join('')}</div>`, (b, close) => {
@@ -1057,6 +1151,12 @@ function itemForm(it, defCat) {
       <button class="btn sec full" id="pickI" style="margin-top:8px">📷 ${it ? 'החלפת תמונה' : 'תמונת המוצר'}</button>
       <button class="btn full" id="aiId" style="margin-top:8px;${it?.img ? '' : 'display:none'}">🤖 זיהוי אוטומטי מהתמונה</button>
       <div id="aiMsg" class="muted" style="margin-top:6px"></div></div>
+    ${it?.review ? `<div class="rule orange" style="margin-top:10px"><span class="dot orange"></span><div><b>⚠️ לבירור:</b><br>${(it.reviewWhy || []).map(esc).join('<br>')}
+      ${it.web?.matches?.length ? `<div style="margin-top:8px"><b>התאמות שנמצאו ברשת</b> (לוחצים כדי למלא, ופותחים את הקישור כדי לוודא):</div>
+        ${it.web.matches.map((m, i) => `<div class="card" style="margin:6px 0;padding:8px"><b>${esc(m.name)}</b>${m.supplier ? ' · ' + esc(m.supplier) : ''}${m.model ? `<br><span dir="ltr">${esc(m.model)}</span>` : ''}${m.why ? `<div class="muted" style="font-size:12px">${esc(m.why)}</div>` : ''}
+          <div class="row" style="margin-top:6px;gap:6px"><button class="btn sm" data-m="${i}">✓ זה המוצר</button>${m.url ? `<a class="btn sec sm" href="${esc(m.url)}" target="_blank" rel="noopener">🔗 לבדיקה</a>` : ''}</div></div>`).join('')}` : ''}
+      ${!it.web?.matches?.length && it.web?.links?.length ? `<div style="margin-top:6px">קישורים שעשויים לעזור: ${it.web.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title || 'קישור')}</a>`).join(' · ')}</div>` : ''}
+      <div class="muted" style="font-size:12px;margin-top:6px">כשמסיימים לבדוק — לוחצים "שמירה" והסימון יורד.</div></div></div>` : ''}
     <label>שם המוצר</label><input id="in" value="${esc(it?.name || '')}" placeholder="למשל: גרניט פורצלן דמוי בטון 60×120">
     <label>קטגוריה</label><select id="ic">${R().catCats.map(c => `<option ${(it?.cat || defCat) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
     <div class="grid2"><div><label>מספר דגם / מק"ט</label><input id="im" value="${esc(it?.model || '')}" dir="ltr" placeholder="CAL-60120"></div>
@@ -1078,6 +1178,11 @@ function itemForm(it, defCat) {
       if (dup && !confirm(`התמונה הזו כבר קיימת בקטלוג:\n"${dup.name}"${dup.model ? ' · ' + dup.model : ''} (${dup.cat})\n\nלהשתמש בה בכל זאת?`)) return;
       newImg = data; newHash = h; ip.src = newImg; ip.style.display = ''; $('#aiId', b).style.display = '';
     };
+    b.querySelectorAll('[data-m]').forEach(bt => bt.onclick = () => {
+      const m = it.web.matches[+bt.dataset.m];
+      if (m.name) $('#in', b).value = m.name; if (m.model) $('#im', b).value = m.model; if (m.supplier) $('#is', b).value = m.supplier; if (m.url) $('#il', b).value = m.url;
+      toast('מולא — לוודא בקישור ואז לשמור');
+    });
     $('#aiId', b).onclick = async () => {
       const src = newImg || ip.src; if (!src) return toast('קודם בוחרים תמונה');
       const btn = $('#aiId', b), msg = $('#aiMsg', b); btn.disabled = true; msg.textContent = '🤖 מזהה…';
@@ -1093,7 +1198,7 @@ function itemForm(it, defCat) {
     };
     $('#ok', b).onclick = async () => {
       const name = $('#in', b).value.trim(); if (!name) return toast('צריך שם למוצר');
-      const d = { name, cat: $('#ic', b).value, model: $('#im', b).value.trim(), supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
+      const d = { review: false, reviewWhy: [], pending: false, name, cat: $('#ic', b).value, model: $('#im', b).value.trim(), supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
       if (newImg) { d.img = await putImg(newImg); d.ph = newHash || await imgHash(newImg); }
       let target = it;
       if (it) Object.assign(it, d); else { target = { id: uid(), ...d }; S.catalog.push(target); }
