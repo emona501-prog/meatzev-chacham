@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.3';
+const APP_VERSION = '0.6.4';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -447,7 +447,7 @@ function studio(p, r, fromDesign) {
         const res = await aiPromptHelper(r, sel, ins, items, baseImg, refs);
         renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close);
       } catch (e) {
-        out.innerHTML = `<div class="rule red" style="margin-top:12px"><span class="dot red"></span><div>${esc(e.message)}</div></div>`;
+        out.innerHTML = `<div class="rule red" style="margin-top:12px"><span class="dot red"></span><div>${esc(e.message)}</div></div>${aiLogHtml()}`;
       } finally { btn.disabled = false; }
     };
     $('#go', b).onclick = async () => {
@@ -479,34 +479,52 @@ function studio(p, r, fromDesign) {
 
 // ---------- עוזר הנחיות (מודל טקסט+ראייה, בשכבה החינמית) ----------
 const TEXT_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+// יומן ניסיונות אחרון — כדי לראות מה גוגל באמת עונה
+let AI_LOG = [];
+function aiLogHtml() {
+  if (!AI_LOG.length) return '';
+  return `<details style="margin-top:8px"><summary class="muted">פרטים טכניים (לצלם מסך ולשלוח)</summary><div dir="ltr" style="font-size:12px;text-align:left;white-space:pre-wrap;word-break:break-word">${AI_LOG.map(l => esc(`${l.model}: ${l.status} ${l.msg}`)).join('\n')}</div></details>`;
+}
 async function geminiText(parts, json, onStatus) {
   const key = S.settings.apiKey.trim();
   const models = [...new Set([S.settings.textModel, ...TEXT_MODELS].filter(Boolean))];
-  let busy = false;
-  for (let round = 0; round < 3; round++) {
-    if (round) { onStatus && onStatus(`השרתים של גוגל עמוסים כרגע. מנסה שוב (${round}/2)…`); await new Promise(r => setTimeout(r, 4000 * round)); }
+  AI_LOG = [];
+  let busy = false, noFree = 0, wait = 0;
+  for (let round = 0; round < 4; round++) {
+    if (round) {
+      const sec = Math.min(30, Math.max(wait, 5 * round));
+      for (let t = sec; t > 0; t--) { onStatus && onStatus(`השרתים של גוגל עמוסים. מנסה שוב בעוד ${t} שניות (${round}/3)…`); await new Promise(r => setTimeout(r, 1000)); }
+    }
+    noFree = 0;
     for (const model of models) {
+      onStatus && onStatus(`שולח ל-${model}…`);
       let res;
       try {
         res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
           body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } })
         });
-      } catch { throw new Error('אין חיבור לאינטרנט.'); }
+      } catch (e) { AI_LOG.push({ model, status: 'net', msg: String(e.message || e) }); throw new Error('אין חיבור לאינטרנט.'); }
       const j = await res.json().catch(() => ({}));
       const msg = j?.error?.message || '';
-      if (res.status === 404) continue;                                   // מודל לא קיים — מנסים את הבא
-      if (res.status === 503 || res.status === 500 || /high demand|overloaded|unavailable/i.test(msg)) { busy = true; continue; } // עומס — מנסים מודל אחר
-      if (res.status === 429) {
-        if (/quota|exhausted|limit/i.test(msg)) { busy = true; continue; } // מכסה של מודל אחד — לפעמים במודל אחר יש עוד מכסה
-      }
+      AI_LOG.push({ model, status: res.status, msg: msg.slice(0, 300) });
+      const rd = (j?.error?.details || []).find(d => d.retryDelay)?.retryDelay;
+      if (rd) wait = Math.max(wait, parseInt(rd) || 0);
+      if (res.status === 404) continue;
       if (res.status === 400 && /API key/i.test(msg)) throw new Error('מפתח ה-AI לא תקין.');
+      if (res.status === 403) throw new Error('המפתח חסום לשירות הזה (403). צריך לבדוק ב-AI Studio שהמפתח שייך לפרויקט עם Gemini API פעיל.');
+      if (res.status === 429 && /limit:\s*0\b|free_tier.*limit.*\b0\b/i.test(msg)) { noFree++; continue; } // אין בכלל מכסה חינמית במודל הזה
+      if (res.status === 503 || res.status === 500 || res.status === 429 || /high demand|overloaded|unavailable/i.test(msg)) { busy = true; continue; }
       if (!res.ok) throw new Error('שגיאה מהשרת: ' + (msg || res.status));
+      const out = (j?.candidates?.[0]?.content?.parts || []).map(x => x.text || '').join('');
+      if (!out) { AI_LOG[AI_LOG.length - 1].msg = 'empty: ' + (j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || ''); continue; }
       S.settings.textModel = model; save();
-      return (j?.candidates?.[0]?.content?.parts || []).map(x => x.text || '').join('');
+      return out;
     }
+    if (noFree && !busy) break;
   }
-  if (busy) throw new Error('השרתים של גוגל עמוסים כרגע, או שהמכסה היומית החינמית נגמרה. זה בדרך כלל זמני — נסו שוב בעוד כמה דקות.');
+  if (noFree && !busy) throw new Error('לפרויקט של המפתח הזה אין מכסה חינמית (גוגל מחזירה limit 0). צריך מפתח מפרויקט אחר ב-AI Studio, או להפעיל חיוב.');
+  if (busy) throw new Error('גוגל לא ענתה גם אחרי כמה ניסיונות. פתחו "פרטים טכניים" למטה וצלמו מסך — זה יגיד בדיוק מה הבעיה.');
   throw new Error('לא נמצא מודל טקסט זמין למפתח הזה.');
 }
 async function aiPromptHelper(r, sel, ins, items, baseImg, refs = []) {
@@ -1143,12 +1161,20 @@ function renderSettings(app) {
 
 async function testKey() {
   const key = S.settings.apiKey; if (!key) return toast('קודם מדביקים מפתח');
-  try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.settings.model || DEFAULT_MODEL)}`, { headers: { 'x-goog-api-key': key } });
-    if (r.ok) toast('✓ המפתח תקין והמודל זמין');
-    else if (r.status === 404) toast('המפתח עובד, אבל שם המודל לא נמצא');
-    else toast('המפתח לא תקין (' + r.status + ')');
-  } catch { toast('אין חיבור לאינטרנט'); }
+  modal('בדיקת חיבור ל-AI', `<div class="muted">שולח הודעה קצרה לכל מודל חינמי ובודק מי עונה…</div><div id="tk" style="margin-top:10px"></div>`, async (b) => {
+    const box = b.querySelector('#tk'); let okAny = false;
+    for (const m of TEXT_MODELS) {
+      const row = document.createElement('div'); row.className = 'rule'; row.innerHTML = `<span class="dot"></span><div dir="ltr" style="text-align:left"><b>${m}</b> …</div>`; box.appendChild(row);
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.trim() }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK' }] }] }) });
+        const j = await r.json().catch(() => ({}));
+        const good = r.ok && j?.candidates; if (good) { if (!okAny) { S.settings.textModel = m; save(); } okAny = true; }
+        row.className = 'rule ' + (good ? 'green' : 'red'); row.querySelector('.dot').className = 'dot ' + (good ? 'green' : 'red');
+        row.querySelector('div').innerHTML = `<b>${m}</b> — ${good ? '✓ עובד' : esc(r.status + ' ' + (j?.error?.message || '').slice(0, 220))}`;
+      } catch (e) { row.querySelector('div').innerHTML = `<b>${m}</b> — אין חיבור`; }
+    }
+    const s2 = document.createElement('div'); s2.style.marginTop = '10px'; s2.innerHTML = okAny ? '<b>✓ יש מודל חינמי שעובד — הכנת ההנחיה תשתמש בו.</b>' : '<b>אף מודל לא ענה. צלמו את המסך הזה ושלחו.</b>'; box.appendChild(s2);
+  });
 }
 
 function collectImgIds(projects, withCatalog) {
