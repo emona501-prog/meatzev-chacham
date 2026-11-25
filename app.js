@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.3.0';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -101,10 +101,10 @@ function go(patch) { Object.assign(V, patch); render(); window.scrollTo(0, 0); }
 $('#tabs').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
-  go({ tab: b.dataset.tab, projectId: null, roomId: null });
+  go({ tab: b.dataset.tab, projectId: null, roomId: null, planOpen: false });
 });
 $('#backBtn').onclick = () => {
-  if (V.roomId) go({ roomId: null }); else if (V.projectId) go({ projectId: null });
+  if (V.planOpen) go({ planOpen: false }); else if (V.roomId) go({ roomId: null }); else if (V.projectId) go({ projectId: null });
 };
 $('#helpBtn').onclick = showHelp;
 
@@ -116,6 +116,7 @@ function setHeader(title, back) {
 async function render() {
   const app = $('#app');
   if (V.tab === 'projects') {
+    if (V.planOpen && proj()) return Plan.open(app, proj());
     if (V.roomId && room()) return renderRoom(app);
     if (V.projectId && proj()) return renderProject(app);
     return renderProjects(app);
@@ -183,6 +184,8 @@ function renderProject(app) {
         <button class="btn sec sm" id="printP">📄 הכנה לדפוס</button>
         <button class="btn sec sm" id="shareP">📤 גיבוי הפרויקט</button>
         <button class="btn danger sm" id="delP">מחיקה</button></div></div>
+    <div class="card list-item" id="openPlan"><div class="ic">📐</div><div class="grow"><b>תוכנית הבית</b>
+      <div class="muted">${p.plan?.walls?.length ? `${p.plan.walls.length} קירות · ${p.plan.openings.length} פתחים${p.plan.original ? ' · יש מצב קיים' : ''}` : 'סרטוט, תלת־ממד, ייצוא לאוטוקאד'}</div></div><span class="muted">‹</span></div>
     <div class="row" style="margin:6px 0 10px"><h2 class="grow" style="margin:0">חדרים</h2><button class="btn" id="newR">+ חדר</button></div>
     ${p.rooms.length ? p.rooms.map(r => {
       const c = catOf(r.cat);
@@ -192,6 +195,7 @@ function renderProject(app) {
   app.querySelectorAll('[data-cover]').forEach(async el => { const id = el.dataset.cover; if (id) { const d = await getImg(id); if (d) el.innerHTML = `<img src="${d}">`; } });
   app.querySelectorAll('.list-item[data-id]').forEach(el => el.onclick = () => go({ roomId: el.dataset.id, roomTab: 'design' }));
   $('#newR').onclick = () => roomForm();
+  $('#openPlan').onclick = () => go({ planOpen: true });
   $('#editP').onclick = () => projectForm(p);
   $('#printP').onclick = () => printProject(p);
   $('#shareP').onclick = () => exportBackup([p]);
@@ -936,6 +940,10 @@ async function printProject(p) {
   const withNotes = S.settings.printNotes;
   let h = `<div class="pp" style="text-align:center;padding-top:120px"><h1 style="font-size:34px">${esc(p.name)}</h1>
     <p>${[p.client, p.address].filter(Boolean).map(esc).join(' · ')}</p><p>${fmtDate(Date.now())}</p><p style="color:#888">מעצב חכם</p></div>`;
+  if (p.plan?.walls?.length) {
+    if (p.plan.original) h += `<div class="pp"><h2>📐 תוכנית — מצב קיים</h2>${Plan.printSVG(p.plan.original)}</div>`;
+    h += `<div class="pp"><h2>📐 תוכנית${p.plan.original ? ' — תכנון' : ''}</h2>${Plan.printSVG(p.plan)}<p>גובה תקרה: ${p.plan.height || 280} ס"מ</p></div>`;
+  }
   for (const r of p.rooms) {
     const c = catOf(r.cat);
     h += `<div class="pp"><h2>${c.icon} ${esc(r.name)}</h2><p>${c.name}${r.L ? ` · מידות: ${r.L}×${r.W}${r.H ? '×' + r.H : ''} ס"מ` : ''}</p>`;
