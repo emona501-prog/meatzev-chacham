@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.7.1';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -327,6 +327,7 @@ async function renderDesignTab(body, p, r) {
       <div class="row" style="margin-top:10px">
         <button class="btn sec sm" data-a="cont">✏️ להמשיך מכאן</button>
         <button class="btn sec sm" data-a="full">🔍 מסך מלא</button>
+        <button class="btn sec sm" data-a="gif">🎞️ GIF לפני/אחרי</button>
         <button class="btn danger sm" data-a="del">מחיקה</button></div>`;
     dl.appendChild(card);
     const [before, after] = [await getImg(d.base), await getImg(d.result)];
@@ -334,12 +335,80 @@ async function renderDesignTab(body, p, r) {
     $('.dnote', card).onchange = (e) => { d.note = e.target.value; save(); };
     card.querySelector('[data-a=cont]').onclick = () => studio(p, r, d);
     card.querySelector('[data-a=full]').onclick = () => viewImage(after);
+    card.querySelector('[data-a=gif]').onclick = () => gifDialog(before, after, `${p.name}-${r.name}`);
     card.querySelector('[data-a=del]').onclick = async () => {
       if (!confirm('למחוק את ההדמיה?')) return;
       if (r.designs.some(x => x.base === d.result)) return toast('הדמיה אחרת נבנתה מההדמיה הזו. מוחקים קודם אותה.');
       r.designs = r.designs.filter(x => x !== d); await delImg(d.result); save(); renderRoom($('#app'));
     };
   }
+}
+
+// =====================================================================
+// GIF לפני/אחרי — וילון שזז מצד לצד, עם תוויות ולוגו
+const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+async function makeBAGif(before, after, onProgress) {
+  const { GIFEncoder, quantize, applyPalette } = await import('./vendor/gifenc.esm.js?v=1');
+  const [bi, ai] = await Promise.all([loadImg(before), loadImg(after)]);
+  let logo = null; try { logo = await loadImg('media/logo.png'); } catch {}
+  const W = Math.min(720, ai.width), H = Math.round(W * ai.height / ai.width);
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  const cover = (img) => { const sc = Math.max(W / img.width, H / img.height), w = img.width * sc, h = img.height * sc; x.drawImage(img, (W - w) / 2, (H - h) / 2, w, h); };
+  const pill = (txt, right) => {
+    const fs = Math.round(W / 22); x.font = `700 ${fs}px Heebo, Arial, sans-serif`; x.direction = 'rtl';
+    const tw = x.measureText(txt).width, pw = tw + fs * 1.2, ph = fs * 1.6, px = right ? W - pw - fs * .6 : fs * .6, py = fs * .6;
+    x.fillStyle = 'rgba(30,25,20,.72)'; x.beginPath(); x.roundRect(px, py, pw, ph, ph / 2); x.fill();
+    x.fillStyle = '#fff'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(txt, px + pw / 2, py + ph / 2 + 1);
+  };
+  // pos = כמה מהתמונה (מימין) כבר "אחרי": 0 = כולה לפני, 1 = כולה אחרי
+  const frame = (pos) => {
+    cover(bi);
+    const cut = W * (1 - pos);
+    if (pos > 0) { x.save(); x.beginPath(); x.rect(cut, 0, W - cut, H); x.clip(); cover(ai); x.restore(); }
+    if (pos > 0 && pos < 1) { x.fillStyle = '#fff'; x.fillRect(cut - 2, 0, 4, H); }
+    if (pos < 1) pill('לפני', false);
+    if (pos > 0) pill('אחרי', true);
+    if (logo) { const s = Math.round(W / 9); x.globalAlpha = .9; x.drawImage(logo, W - s - 10, H - s - 10, s, s); x.globalAlpha = 1; }
+    return x.getImageData(0, 0, W, H).data;
+  };
+  const ease = (t) => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  const plan = [[0, 1400]];
+  const N = 14;
+  for (let i = 1; i < N; i++) plan.push([ease(i / N), 70]);
+  plan.push([1, 1800]);
+  for (let i = N - 1; i > 0; i--) plan.push([ease(i / N), 70]);
+  // פלטה אחת משותפת מתמונת "לפני" ו"אחרי" — מהיר יותר ובלי הבהובים
+  const fb = frame(0), fa = frame(1);
+  const mix = new Uint8ClampedArray(fb.length * 2); mix.set(fb); mix.set(fa, fb.length);
+  const palette = quantize(mix, 256);
+  const gif = GIFEncoder();
+  for (let i = 0; i < plan.length; i++) {
+    const [pos, delay] = plan[i];
+    gif.writeFrame(applyPalette(frame(pos), palette), W, H, { palette, delay });
+    onProgress && onProgress((i + 1) / plan.length);
+    if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+  gif.finish();
+  return new Blob([gif.bytes()], { type: 'image/gif' });
+}
+function gifDialog(before, after, name) {
+  modal('GIF לפני / אחרי', `<div id="gp" class="muted" style="text-align:center"><div class="spinner"></div>מכין את ה-GIF… <span id="gpp">0%</span></div>`, async (b) => {
+    try {
+      const blob = await makeBAGif(before, after, (p) => { const e = b.querySelector('#gpp'); if (e) e.textContent = Math.round(p * 100) + '%'; });
+      const fname = `${name}-לפני-אחרי.gif`.replace(/[\\/:*?"<>|]/g, '-');
+      const file = new File([blob], fname, { type: 'image/gif' });
+      const url = URL.createObjectURL(blob);
+      b.innerHTML = `<img src="${url}" style="width:100%;border-radius:12px">
+        <div class="muted" style="text-align:center;margin:6px 0">${(blob.size / 1048576).toFixed(1)} MB</div>
+        <div class="grid2"><button class="btn" id="gShare">📤 שיתוף</button><button class="btn sec" id="gSave">💾 הורדה</button></div>`;
+      b.querySelector('#gSave').onclick = () => { const a = document.createElement('a'); a.href = url; a.download = fname; a.click(); toast('נשמר בהורדות'); };
+      b.querySelector('#gShare').onclick = async () => {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: 'לפני / אחרי' }); } catch {} }
+        else b.querySelector('#gSave').click();
+      };
+    } catch (e) { b.innerHTML = `<div class="rule red"><span class="dot red"></span><div>לא הצלחתי ליצור GIF: ${esc(e.message)}</div></div>`; }
+  });
 }
 
 function beforeAfter(wrap, before, after) {
