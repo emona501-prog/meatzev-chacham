@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.5.2';
+const APP_VERSION = '0.6.0';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -344,7 +344,10 @@ function studio(p, r, fromDesign) {
     <textarea id="ins" placeholder="למשל: להחליף את הריצוף לאריח שבחרתי, לצבוע את הקיר מאחורי המיטה בבז' חם, להשאיר את הארון כמו שהוא">${esc('')}</textarea>
     <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="keep" checked style="width:auto"> לשנות רק מה שביקשתי, כל השאר נשאר בדיוק אותו דבר</label>
     <div style="height:14px"></div>
-    <button class="btn full" id="go">✨ צור הדמיה</button>
+    <button class="btn full" id="go">✨ צור הדמיה (בתשלום)</button>
+    <div style="height:8px"></div>
+    <button class="btn sec full" id="goPrompt">📝 הכנת הנחיה מקצועית לג'מיני (חינם)</button>
+    <div class="muted" style="margin-top:4px">המערכת מסתכלת על התמונה, בודקת מול הכללים, וכותבת הנחיה מדויקת להדבקה באפליקציית Gemini.</div>
     <div id="out"></div>`, async (b, close) => {
     for (const el of b.querySelectorAll('#bases .t')) {
       el.querySelector('img').src = await getImg(el.dataset.id);
@@ -368,6 +371,23 @@ function studio(p, r, fromDesign) {
     };
     b.querySelectorAll('#icats .chip').forEach(ch => ch.onclick = () => { b.querySelectorAll('#icats .chip').forEach(x => x.classList.toggle('on', x === ch)); showCat(ch.dataset.c); });
     const first = b.querySelector('#icats .chip'); if (first) showCat(first.dataset.c); selCount();
+    $('#goPrompt', b).onclick = async () => {
+      if (!S.settings.apiKey) { toast('צריך להכניס מפתח AI בהגדרות'); return; }
+      const ins = $('#ins', b).value.trim();
+      if (!ins && !sel.style && !sel.items.size) return toast('בוחרים סגנון, מוצר או כותבים מה לשנות');
+      sel.keep = $('#keep', b).checked;
+      const out = $('#out', b), btn = $('#goPrompt', b);
+      btn.disabled = true; out.innerHTML = `<div class="spinner"></div><div class="muted" style="text-align:center">מנתח את התמונה וכותב הנחיה…</div>`;
+      try {
+        const baseImg = await getImg(sel.base);
+        const items = [...sel.items].map(id => S.catalog.find(x => x.id === id)).filter(Boolean);
+        const refs = []; for (const it of items) refs.push({ item: it, img: await getImg(it.img) || await Sync.fetchImg(it.img) });
+        const res = await aiPromptHelper(r, sel, ins, items, baseImg);
+        renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close);
+      } catch (e) {
+        out.innerHTML = `<div class="rule red" style="margin-top:12px"><span class="dot red"></span><div>${esc(e.message)}</div></div>`;
+      } finally { btn.disabled = false; }
+    };
     $('#go', b).onclick = async () => {
       if (!S.settings.apiKey) { toast('צריך להכניס מפתח AI בהגדרות'); return; }
       const ins = $('#ins', b).value.trim();
@@ -394,6 +414,105 @@ function studio(p, r, fromDesign) {
       } finally { btn.disabled = false; }
     };
   });
+}
+
+// ---------- עוזר הנחיות (מודל טקסט+ראייה, בשכבה החינמית) ----------
+const TEXT_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+async function geminiText(parts, json) {
+  const key = S.settings.apiKey.trim(); let lastErr = '';
+  const models = [S.settings.textModel, ...TEXT_MODELS].filter(Boolean);
+  for (const model of [...new Set(models)]) {
+    let res;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } })
+      });
+    } catch { throw new Error('אין חיבור לאינטרנט.'); }
+    const j = await res.json().catch(() => ({}));
+    if (res.status === 404) { lastErr = 'model'; continue; }
+    if (!res.ok) {
+      if (res.status === 429) throw new Error('המכסה היומית החינמית נגמרה. אפשר לנסות שוב מחר, או להוסיף כרטיס.');
+      if (res.status === 400 && /API key/i.test(j?.error?.message || '')) throw new Error('מפתח ה-AI לא תקין.');
+      throw new Error('שגיאה מהשרת: ' + (j?.error?.message || res.status));
+    }
+    S.settings.textModel = model; save();
+    return (j?.candidates?.[0]?.content?.parts || []).map(x => x.text || '').join('');
+  }
+  throw new Error('לא נמצא מודל טקסט זמין למפתח הזה.');
+}
+async function aiPromptHelper(r, sel, ins, items, baseImg) {
+  const c = catOf(r.cat);
+  const own = R().checks[r.cat] || [];
+  const checks = [...own, ...R().checks._all.filter(x => !own.some(y => y.key === x.key))];
+  const fixed = [...(R().fixed[r.cat] || []), ...R().fixed._all];
+  const rules = [...fixed.map(f => `- [${f.level}] ${f.text}`), ...checks.map(ch => `- [${ch.level}] ${ch.label}: ${ch.min != null ? 'min ' + ch.min : ''}${ch.max != null ? ' max ' + ch.max : ''} cm — ${ch.msg}`)].join('\n');
+  const sys = `You are a senior interior designer and an expert prompt engineer for Google Gemini image editing ("Nano Banana").
+The user is an Israeli interior-design student. She uploads a real photo of a room and describes in Hebrew what she wants.
+Your job: look carefully at the photo and write ONE precise, professional image-editing prompt (in English) that she will paste into the Gemini app together with the photo (and the product photos listed below, attached in the same order).
+
+The prompt you write MUST:
+1. Start by instructing to edit the attached room photo, not to create a new image.
+2. Lock the geometry: same camera angle, perspective, framing, walls, windows, doors, ceiling, room size and proportions.${sel.keep ? '\n3. Change ONLY the requested elements; everything else stays pixel-identical. No added furniture or decor that was not requested.' : '\n3. Allow tasteful complementary decor that fits the style, using only realistic market products.'}
+4. Describe each requested change concretely: exact element, material, finish, color, texture, pattern, scale and placement — using professional interior-design vocabulary, based on what you actually see in the photo (refer to visible elements by location, e.g. "the wall behind the bed on the left").
+5. If product photos are attached, tell Gemini to reproduce them faithfully (reference image 2, 3...) and not substitute them.
+6. Require photorealistic lighting consistent with the photo, realistic shadows/reflections, no people, no text, no watermark.
+7. Respect the real dimensions and the professional rules below. Never move, remove or open structural/bearing walls or shelter (ממ"ד) walls.
+
+Room type: ${c.name}. Real size: ${r.L ? `${r.L} x ${r.W} cm, ceiling ${r.H || '?'} cm` : 'unknown'}.
+Style: ${sel.style || 'not specified — keep the existing style unless the request implies otherwise'}.
+Products to use (attached as reference images in this order):
+${items.length ? items.map((it, i) => `${i + 2}. ${it.name} (${it.cat}${it.dims ? ', ' + it.dims : ''}${it.color ? ', ' + it.color : ''}${it.supplier ? ', supplier ' + it.supplier : ''})`).join('\n') : 'none'}
+Professional rules from her course (red = forbidden, orange = needs checking, green = recommendation):
+${rules}
+
+The designer's request (Hebrew): """${ins || '(no text — use the style and products)'}"""
+
+Return JSON only:
+{"prompt": "<the English prompt, ready to paste>",
+ "prompt_he": "<a short Hebrew translation/summary of the prompt so she understands it>",
+ "observations_he": ["<what you see in the photo that matters: materials, light, problems>"],
+ "warnings_he": ["<any conflict between her request and the rules or the real dimensions; empty if none>"],
+ "tips_he": ["<1-3 professional design tips relevant to this request>"]}`;
+  const part = (d) => { const [h, b64] = d.split(','); return { inline_data: { mime_type: h.match(/data:(.*?);/)?.[1] || 'image/jpeg', data: b64 } }; };
+  const txt = await geminiText([{ text: sys }, part(baseImg)], true);
+  try { return JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { return { prompt: txt, prompt_he: '', observations_he: [], warnings_he: [], tips_he: [] }; }
+}
+function renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close) {
+  const li = (a) => (a || []).filter(Boolean).map(x => `<li>${esc(x)}</li>`).join('');
+  out.innerHTML = `<div style="height:12px"></div>
+    ${(res.warnings_he || []).filter(Boolean).length ? `<div class="rule orange"><span class="dot orange"></span><div><b>שימי לב:</b><ul style="margin:4px 0;padding-inline-start:18px">${li(res.warnings_he)}</ul></div></div>` : ''}
+    <div class="card"><h3>📝 ההנחיה לג'מיני</h3>
+      <textarea id="pTxt" dir="ltr" style="min-height:180px;font-size:13px">${esc(res.prompt || '')}</textarea>
+      <div class="grid2" style="margin-top:8px"><button class="btn" id="pCopy">📋 העתקת ההנחיה</button><button class="btn sec" id="pShare">📤 שיתוף לג'מיני</button></div>
+      ${res.prompt_he ? `<details style="margin-top:8px"><summary class="muted">מה כתוב בהנחיה (בעברית)</summary><div style="font-size:14px;margin-top:6px">${esc(res.prompt_he)}</div></details>` : ''}</div>
+    ${li(res.observations_he) ? `<div class="card"><h3>👁️ מה המערכת ראתה בתמונה</h3><ul style="margin:0;padding-inline-start:18px;font-size:14px">${li(res.observations_he)}</ul></div>` : ''}
+    ${li(res.tips_he) ? `<div class="card"><h3>💡 טיפים</h3><ul style="margin:0;padding-inline-start:18px;font-size:14px">${li(res.tips_he)}</ul></div>` : ''}
+    <div class="card"><h3>איך משתמשים</h3><div style="font-size:14px;line-height:1.7">
+      1. לוחצים <b>שיתוף לג'מיני</b> ובוחרים Gemini. התמונות וההנחיה נשלחות יחד.<br>
+      (או: <b>העתקת ההנחיה</b>, פותחים את Gemini, מצרפים את תמונת החדר${refs.length ? ' ואז את תמונות המוצרים לפי הסדר' : ''}, ומדביקים.)<br>
+      2. כשג'מיני מחזיר תמונה — שומרים אותה בטלפון.<br>
+      3. חוזרים לכאן ולוחצים <b>שמירת התוצאה מג'מיני</b> — ותקבלו לפני/אחרי בתוך הפרויקט.</div>
+      <div style="height:10px"></div>
+      <div class="grid2"><a class="btn sec" href="https://gemini.google.com/app" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">🔗 פתיחת Gemini</a><button class="btn" id="pSave">💾 שמירת התוצאה מג'מיני</button></div>
+      ${refs.length ? `<div class="muted" style="margin-top:8px">תמונות לצירוף לפי הסדר: 1. החדר${refs.map((x, i) => ` · ${i + 2}. ${esc(x.item.name)}`).join('')}</div>` : ''}</div>`;
+  const getTxt = () => $('#pTxt', out).value;
+  $('#pCopy', out).onclick = async () => { try { await navigator.clipboard.writeText(getTxt()); toast('ההנחיה הועתקה'); } catch { $('#pTxt', out).select(); document.execCommand('copy'); toast('ההנחיה הועתקה'); } };
+  $('#pShare', out).onclick = async () => {
+    const toFile = async (d, n) => new File([await (await fetch(d)).blob()], n, { type: 'image/jpeg' });
+    const files = [await toFile(baseImg, '1-room.jpg')];
+    for (const [i, x] of refs.entries()) if (x.img) files.push(await toFile(x.img, `${i + 2}-product.jpg`));
+    try { await navigator.clipboard.writeText(getTxt()); } catch {}
+    if (navigator.canShare && navigator.canShare({ files })) {
+      try { await navigator.share({ files, text: getTxt() }); toast('אם ההנחיה לא הודבקה לבד — היא כבר מועתקת, רק להדביק', 4000); } catch {}
+    } else toast('השיתוף לא נתמך כאן. ההנחיה הועתקה — פותחים את Gemini ומדביקים.', 4000);
+  };
+  $('#pSave', out).onclick = async () => {
+    const [f] = await pickFiles(); if (!f) return;
+    const rid = await putImg(await compressImage(f, 1600, 0.88));
+    r.designs.push({ id: uid(), base: sel.base, result: rid, style: sel.style, items: [...sel.items], instructions: ins, note: 'נוצר ב-Gemini לפי ההנחיה', prompt: getTxt(), created: Date.now() });
+    p.updated = Date.now(); save(); close(); toast('נשמר עם לפני/אחרי ✓'); renderRoom($('#app'));
+  };
 }
 
 function buildPrompt(r, sel, ins, items) {
