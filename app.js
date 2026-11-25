@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -43,6 +43,14 @@ const DB = {
 };
 
 let S = { projects: [], catalog: [], settings: { apiKey: '', model: DEFAULT_MODEL, printNotes: true } };
+// כללים ורשימות שניתנים לעריכה (נשמרים ב-S.custom ומסתנכרנים למאגר המשותף)
+const clone = (o) => JSON.parse(JSON.stringify(o));
+function R() { return S.custom || { checks: CHECKS, fixed: FIXED_RULES, styles: STYLES, catCats: CATALOG_CATS }; }
+function editableRules() {
+  if (!S.custom) S.custom = { checks: clone(CHECKS), fixed: clone(FIXED_RULES), styles: [...STYLES], catCats: [...CATALOG_CATS], updated: 0 };
+  return S.custom;
+}
+function rulesChanged() { S.custom.updated = Date.now(); save(); Sync.pushRules(); }
 let saveTimer = null;
 function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => DB.set('state', S), 300); }
 
@@ -324,9 +332,10 @@ function studio(p, r, fromDesign) {
     <label>1. על איזו תמונה מעצבים?</label>
     <div class="thumbs" id="bases">${bases.map(b => `<div class="t ${b.id === sel.base ? 'sel' : ''}" data-id="${b.id}"><img><span class="badge" style="position:absolute;bottom:4px;right:4px">${b.label}</span></div>`).join('')}</div>
     <label>2. סגנון (לא חובה)</label>
-    <div class="chips" id="styles">${STYLES.map(s => `<span class="chip ${s === sel.style ? 'on' : ''}">${esc(s)}</span>`).join('')}</div>
+    <div class="chips" id="styles">${R().styles.map(s => `<span class="chip ${s === sel.style ? 'on' : ''}">${esc(s)}</span>`).join('')}</div>
     <label>3. מוצרים מהקטלוג (המערכת תשתמש בדיוק בהם)</label>
-    <div id="items">${S.catalog.length ? '' : '<div class="muted">הקטלוג ריק. אפשר להוסיף מוצרים בלשונית "קטלוג".</div>'}</div>
+    ${S.catalog.length ? `<div class="chips" id="icats" style="margin-bottom:8px">${R().catCats.filter(c => S.catalog.some(x => x.cat === c)).map((c, i) => `<span class="chip ${i === 0 ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}</span>`).join('')}</div>
+      <div class="thumbs" id="items"></div><div class="muted" id="selCount" style="margin-top:6px"></div>` : '<div class="muted">הקטלוג ריק. אפשר להוסיף מוצרים בלשונית "קטלוג".</div>'}
     <label>4. מה לשנות? (במילים שלך)</label>
     <textarea id="ins" placeholder="למשל: להחליף את הריצוף לאריח שבחרתי, לצבוע את הקיר מאחורי המיטה בבז' חם, להשאיר את הארון כמו שהוא">${esc('')}</textarea>
     <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="keep" checked style="width:auto"> לשנות רק מה שביקשתי, כל השאר נשאר בדיוק אותו דבר</label>
@@ -342,13 +351,19 @@ function studio(p, r, fromDesign) {
       ch.classList.toggle('on', on); sel.style = on ? ch.textContent : '';
     });
     const itemsEl = $('#items', b);
-    for (const it of S.catalog) {
-      const d = document.createElement('div'); d.className = 'card pick cat-item' + (sel.items.has(it.id) ? ' on' : ''); d.style.padding = '8px'; d.style.marginBottom = '6px';
-      d.innerHTML = `<img><div class="grow"><b>${esc(it.name)}</b><div class="muted">${esc(it.cat)}${it.supplier ? ' · ' + esc(it.supplier) : ''}</div></div>`;
-      d.querySelector('img').src = await getImg(it.img) || 'icon.svg';
-      d.onclick = () => { sel.items.has(it.id) ? sel.items.delete(it.id) : sel.items.add(it.id); d.classList.toggle('on'); };
-      itemsEl.appendChild(d);
-    }
+    const selCount = () => { const c = $('#selCount', b); if (c) c.textContent = sel.items.size ? `נבחרו ${sel.items.size} מוצרים` : 'לוחצים על תמונה כדי לבחור'; };
+    const showCat = (cat) => {
+      if (!itemsEl) return; itemsEl.innerHTML = '';
+      for (const it of S.catalog.filter(x => x.cat === cat)) {
+        const d = document.createElement('div'); d.className = 't' + (sel.items.has(it.id) ? ' sel' : '');
+        d.innerHTML = `<img loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:11px;padding:12px 5px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}</div>`;
+        getImg(it.img).then(async src => { d.querySelector('img').src = src || await Sync.fetchImg(it.img) || 'icon.svg'; });
+        d.onclick = () => { sel.items.has(it.id) ? sel.items.delete(it.id) : sel.items.add(it.id); d.classList.toggle('sel'); selCount(); };
+        itemsEl.appendChild(d);
+      }
+    };
+    b.querySelectorAll('#icats .chip').forEach(ch => ch.onclick = () => { b.querySelectorAll('#icats .chip').forEach(x => x.classList.toggle('on', x === ch)); showCat(ch.dataset.c); });
+    const first = b.querySelector('#icats .chip'); if (first) showCat(first.dataset.c); selCount();
     $('#go', b).onclick = async () => {
       if (!S.settings.apiKey) { toast('צריך להכניס מפתח AI בהגדרות'); return; }
       const ins = $('#ins', b).value.trim();
@@ -440,8 +455,8 @@ function evalCheck(ch, v) {
   return { ok: true, txt: 'תקין ✓' };
 }
 function renderChecksTab(body, p, r) {
-  const checks = [...(CHECKS[r.cat] || []), ...CHECKS._all];
-  const fixed = [...(FIXED_RULES[r.cat] || []), ...FIXED_RULES._all];
+  const checks = [...(R().checks[r.cat] || []), ...R().checks._all];
+  const fixed = [...(R().fixed[r.cat] || []), ...R().fixed._all];
   const roomChecks = r.cat === 'corridor' && r.W ? `<div class="muted">רוחב החדר שהוגדר: ${r.W} ס"מ</div>` : '';
   body.innerHTML = `
     <div class="card"><h3>📏 בדיקת מידות</h3>${roomChecks}
@@ -503,36 +518,70 @@ function elementForm(r, el) {
 }
 
 // =====================================================================
-// קטלוג
+// קטלוג — מאגר תמונות לפי קטגוריה (משותף בסנכרון)
 // =====================================================================
+async function catalogImageData(file) {
+  // תמונות קטלוג נשמרות קטנות יותר, כדי שיעברו בסנכרון
+  let d = await compressImage(file, 1024, 0.8);
+  if (d.length > 850000) d = await compressImage(file, 800, 0.7);
+  return d;
+}
 async function renderCatalog(app) {
   setHeader('קטלוג מוצרים', false);
-  const list = S.catalog.filter(x => !V.catFilter || x.cat === V.catFilter);
+  const cat = V.catFilter;
+  const list = S.catalog.filter(x => !cat || x.cat === cat).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const count = (c) => S.catalog.filter(x => x.cat === c).length;
   app.innerHTML = `
-    <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2><button class="btn" id="newI">+ מוצר</button></div>
-    <div class="muted" style="margin-bottom:10px">מוצרים אמיתיים מהשוק. ה-AI משתמש בתמונה של המוצר ולא ממציא משהו אחר.</div>
-    <div class="chips" style="margin-bottom:12px"><span class="chip ${!V.catFilter ? 'on' : ''}" data-c="">הכול</span>
-      ${CATALOG_CATS.map(c => `<span class="chip ${V.catFilter === c ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}</span>`).join('')}</div>
-    <div id="clist">${list.length ? '' : '<div class="empty"><b>🧱</b>אין מוצרים בקטגוריה הזו.</div>'}</div>`;
+    <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2>
+      ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄 סנכרון</button>` : ''}</div>
+    <div class="muted" style="margin-bottom:10px">מוצרים אמיתיים מהשוק. ה-AI משתמש בתמונה של המוצר ולא ממציא משהו אחר.
+      ${S.sync?.code ? '<br>🤝 המאגר משותף — כל מה שמוסיפים כאן מתעדכן אצל כל השותפים.' : ''}</div>
+    <div class="chips" style="margin-bottom:12px"><span class="chip ${!cat ? 'on' : ''}" data-c="">הכול (${S.catalog.length})</span>
+      ${R().catCats.map(c => `<span class="chip ${cat === c ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}${count(c) ? ` (${count(c)})` : ''}</span>`).join('')}</div>
+    <div class="grid2" style="margin-bottom:12px">
+      <button class="btn" id="bulk">📥 הוספת הרבה תמונות</button>
+      <button class="btn sec" id="newI">+ מוצר עם פרטים</button></div>
+    ${cat ? '' : '<div class="muted" style="margin-bottom:10px">טיפ: בוחרים קודם קטגוריה, ואז כל התמונות שמוסיפים נכנסות אליה.</div>'}
+    <div class="thumbs" id="clist"></div>
+    ${list.length ? '' : '<div class="empty"><b>🧱</b>אין מוצרים בקטגוריה הזו עדיין.</div>'}`;
   app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => go({ catFilter: c.dataset.c }));
-  $('#newI').onclick = () => itemForm();
+  $('#newI').onclick = () => itemForm(null, cat);
+  $('#bulk').onclick = () => bulkAdd(cat);
+  if ($('#syncNow')) $('#syncNow').onclick = () => Sync.run(true);
   const cl = $('#clist');
   for (const it of list) {
-    const d = document.createElement('div'); d.className = 'card cat-item';
-    d.innerHTML = `<img><div class="grow"><b>${esc(it.name)}</b><div class="muted">${esc(it.cat)}${it.supplier ? ' · ' + esc(it.supplier) : ''}${it.price ? ' · ' + esc(it.price) : ''}</div>
-      ${it.dims || it.color ? `<div class="muted">${esc([it.dims, it.color].filter(Boolean).join(' · '))}</div>` : ''}</div><span class="muted">‹</span>`;
-    d.querySelector('img').src = await getImg(it.img) || 'icon.svg';
-    d.onclick = () => itemForm(it);
+    const d = document.createElement('div'); d.className = 't';
+    d.innerHTML = `<img loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:11px;padding:14px 5px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}</div>`;
     cl.appendChild(d);
+    d.onclick = () => itemForm(it);
+    getImg(it.img).then(src => { d.querySelector('img').src = src || 'icon.svg'; if (!src && it.img) Sync.fetchImg(it.img).then(s2 => { if (s2) d.querySelector('img').src = s2; }); });
   }
 }
-function itemForm(it) {
+
+async function bulkAdd(cat) {
+  if (!cat) {
+    return modal('לאיזו קטגוריה?', `<div class="chips">${R().catCats.map(c => `<span class="chip" data-c="${esc(c)}">${esc(c)}</span>`).join('')}</div>`, (b, close) => {
+      b.querySelectorAll('[data-c]').forEach(ch => ch.onclick = () => { close(); V.catFilter = ch.dataset.c; render(); bulkAdd(ch.dataset.c); });
+    });
+  }
+  const files = await pickFiles(true); if (!files.length) return;
+  let n = S.catalog.filter(x => x.cat === cat).length;
+  for (let i = 0; i < files.length; i++) {
+    toast(`מוסיף תמונה ${i + 1} מתוך ${files.length}…`, 1200);
+    const data = await catalogImageData(files[i]);
+    const it = { id: uid(), name: `${cat} ${++n}`, cat, supplier: '', dims: '', color: '', price: '', link: '', note: '', img: await putImg(data), updated: Date.now() };
+    S.catalog.push(it); Sync.pushItem(it, data);
+  }
+  save(); toast(`נוספו ${files.length} תמונות ל"${cat}". אפשר ללחוץ על תמונה ולהוסיף שם ופרטים.`, 3500); render();
+}
+
+function itemForm(it, defCat) {
   let newImg = null;
   modal(it ? 'עריכת מוצר' : 'מוצר חדש', `
-    <div id="imgBox" style="text-align:center"><img id="ip" style="max-width:100%;max-height:200px;border-radius:12px;display:none">
-      <button class="btn sec full" id="pickI" style="margin-top:8px">📷 תמונת המוצר</button></div>
+    <div id="imgBox" style="text-align:center"><img id="ip" style="max-width:100%;max-height:240px;border-radius:12px;display:none">
+      <button class="btn sec full" id="pickI" style="margin-top:8px">📷 ${it ? 'החלפת תמונה' : 'תמונת המוצר'}</button></div>
     <label>שם המוצר</label><input id="in" value="${esc(it?.name || '')}" placeholder="למשל: גרניט פורצלן דמוי בטון 60×120">
-    <label>קטגוריה</label><select id="ic">${CATALOG_CATS.map(c => `<option ${it?.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+    <label>קטגוריה</label><select id="ic">${R().catCats.map(c => `<option ${(it?.cat || defCat) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
     <label>ספק / חנות</label><input id="is" value="${esc(it?.supplier || '')}">
     <div class="grid2"><div><label>מידות</label><input id="id" value="${esc(it?.dims || '')}" placeholder="60×120 ס&quot;מ"></div>
       <div><label>צבע / גימור</label><input id="ico" value="${esc(it?.color || '')}" placeholder="אפור מט"></div></div>
@@ -542,39 +591,209 @@ function itemForm(it) {
     <div style="height:14px"></div><button class="btn full" id="ok">שמירה</button>
     ${it ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקת המוצר</button>' : ''}`, async (b, close) => {
     const ip = $('#ip', b);
-    if (it?.img) { ip.src = await getImg(it.img); ip.style.display = ''; }
-    $('#pickI', b).onclick = async () => { const [f] = await pickFiles(); if (!f) return; newImg = await compressImage(f, 1024); ip.src = newImg; ip.style.display = ''; };
+    if (it?.img) { ip.src = await getImg(it.img) || await Sync.fetchImg(it.img) || ''; ip.style.display = ip.src ? '' : 'none'; }
+    $('#pickI', b).onclick = async () => { const [f] = await pickFiles(); if (!f) return; newImg = await catalogImageData(f); ip.src = newImg; ip.style.display = ''; };
     $('#ok', b).onclick = async () => {
       const name = $('#in', b).value.trim(); if (!name) return toast('צריך שם למוצר');
-      const d = { name, cat: $('#ic', b).value, supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim() };
-      if (newImg) { if (it?.img) await delImg(it.img); d.img = await putImg(newImg); }
-      if (it) Object.assign(it, d); else S.catalog.push({ id: uid(), ...d });
+      const d = { name, cat: $('#ic', b).value, supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
+      if (newImg) { d.img = await putImg(newImg); }
+      let target = it;
+      if (it) Object.assign(it, d); else { target = { id: uid(), ...d }; S.catalog.push(target); }
+      Sync.pushItem(target, newImg);
       save(); close(); render();
     };
     if (it) $('#del', b).onclick = async () => {
-      if (!confirm('למחוק את המוצר?')) return;
-      await delImg(it.img); S.catalog = S.catalog.filter(x => x !== it); save(); close(); render();
+      if (!confirm('למחוק את המוצר? הוא יימחק גם אצל השותפים.')) return;
+      await delImg(it.img); S.catalog = S.catalog.filter(x => x !== it); Sync.deleteItem(it); save(); close(); render();
     };
   });
 }
+
+// =====================================================================
+// סנכרון משותף (Firebase Firestore דרך REST — בלי ספריות)
+// מבנה: ws/{code}/items/{id}  — פרטי מוצר
+//        ws/{code}/imgs/{imgId} — התמונה (base64)
+// =====================================================================
+const Sync = {
+  busy: false,
+  ok() { return !!(S.sync?.projectId && S.sync?.apiKey && S.sync?.code); },
+  base() { return `https://firestore.googleapis.com/v1/projects/${S.sync.projectId}/databases/(default)/documents/ws/${S.sync.code}`; },
+  async req(path, opt = {}) {
+    const url = this.base() + path + (path.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(S.sync.apiKey);
+    const r = await fetch(url, { ...opt, headers: { 'Content-Type': 'application/json' } });
+    if (r.status === 404) return null;
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j?.error?.message || ('שגיאת סנכרון ' + r.status)); }
+    return r.json();
+  },
+  meta(it) { const { img, updated, ...rest } = it; return rest; },
+  async pushItem(it, imgData) {
+    if (!this.ok()) return;
+    try {
+      if (imgData && it.img) await this.req(`/imgs/${it.img}`, { method: 'PATCH', body: JSON.stringify({ fields: { data: { stringValue: imgData } } }) });
+      await this.req(`/items/${it.id}`, { method: 'PATCH', body: JSON.stringify({ fields: {
+        meta: { stringValue: JSON.stringify(this.meta(it)) }, img: { stringValue: it.img || '' },
+        updated: { integerValue: String(it.updated || Date.now()) }, deleted: { booleanValue: false } } }) });
+      it.synced = true; save();
+    } catch (e) { it.synced = false; save(); console.warn(e); }
+  },
+  async deleteItem(it) {
+    if (!this.ok()) return;
+    S.tombs = S.tombs || []; S.tombs.push(it.id); save();
+    try {
+      await this.req(`/items/${it.id}`, { method: 'PATCH', body: JSON.stringify({ fields: { deleted: { booleanValue: true }, updated: { integerValue: String(Date.now()) }, meta: { stringValue: '{}' }, img: { stringValue: '' } } }) });
+      if (it.img) await this.req(`/imgs/${it.img}`, { method: 'DELETE' });
+      S.tombs = S.tombs.filter(x => x !== it.id); save();
+    } catch (e) { console.warn(e); }
+  },
+  async fetchImg(id) {
+    if (!this.ok() || !id) return '';
+    try { const d = await this.req(`/imgs/${id}`); const v = d?.fields?.data?.stringValue; if (v) { imgCache[id] = v; await DB.set(id, v); } return v || ''; }
+    catch { return ''; }
+  },
+  async listItems() {
+    const out = []; let token = '';
+    do {
+      const d = await this.req(`/items?pageSize=300${token ? '&pageToken=' + encodeURIComponent(token) : ''}`);
+      (d?.documents || []).forEach(doc => out.push(doc)); token = d?.nextPageToken || '';
+    } while (token);
+    return out;
+  },
+  async run(manual) {
+    if (!this.ok() || this.busy) return;
+    this.busy = true; if (manual) toast('מסנכרן…');
+    try {
+      // מחיקות שלא נשלחו
+      for (const id of [...(S.tombs || [])]) await this.deleteItem({ id });
+      const rulesGot = await this.syncRules();
+      const remote = await this.listItems();
+      const seen = new Set(); let got = 0, sent = 0;
+      for (const doc of remote) {
+        const id = doc.name.split('/').pop(); seen.add(id);
+        const f = doc.fields || {}; const rUpd = +(f.updated?.integerValue || 0);
+        const local = S.catalog.find(x => x.id === id);
+        if (f.deleted?.booleanValue) { if (local) { await delImg(local.img); S.catalog = S.catalog.filter(x => x !== local); got++; } continue; }
+        if (!local || rUpd > (local.updated || 0)) {
+          const meta = JSON.parse(f.meta?.stringValue || '{}');
+          const it = { ...meta, id, img: f.img?.stringValue || '', updated: rUpd, synced: true };
+          if (local) Object.assign(local, it); else S.catalog.push(it);
+          got++;
+        } else if (local && (local.updated || 0) > rUpd) { await this.pushItem(local, await getImg(local.img)); sent++; }
+      }
+      for (const it of S.catalog.filter(x => !seen.has(x.id))) { await this.pushItem(it, await getImg(it.img)); sent++; }
+      S.sync.last = Date.now(); save();
+      if (manual || got) toast(`הסנכרון הושלם${got ? ` · התקבלו ${got} עדכונים` : ''}${sent ? ` · נשלחו ${sent}` : ''}`);
+      if (rulesGot && manual) toast('הכללים עודכנו מהמאגר');
+      if ((got && V.tab === 'catalog') || (rulesGot && V.tab !== 'projects')) render();
+    } catch (e) { if (manual) toast('הסנכרון נכשל: ' + e.message, 4500); }
+    finally { this.busy = false; }
+  },
+  async pushRules() {
+    if (!this.ok() || !S.custom) return;
+    try { await this.req('/meta/rules', { method: 'PATCH', body: JSON.stringify({ fields: { data: { stringValue: JSON.stringify(S.custom) }, updated: { integerValue: String(S.custom.updated || 0) } } }) }); }
+    catch (e) { console.warn(e); }
+  },
+  async syncRules() {
+    const d = await this.req('/meta/rules');
+    const rUpd = +(d?.fields?.updated?.integerValue || 0), lUpd = S.custom?.updated || 0;
+    if (d && rUpd > lUpd) { S.custom = JSON.parse(d.fields.data.stringValue); save(); return true; }
+    if (S.custom && lUpd > rUpd) await this.pushRules();
+    return false;
+  },
+  inviteCode() { return btoa(unescape(encodeURIComponent(JSON.stringify({ p: S.sync.projectId, k: S.sync.apiKey, c: S.sync.code })))); },
+  join(code) {
+    try {
+      const o = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
+      if (!o.p || !o.k || !o.c) throw 0;
+      S.sync = { projectId: o.p, apiKey: o.k, code: o.c }; save(); toast('הצטרפת למאגר המשותף 🤝'); this.run(true); return true;
+    } catch { toast('קוד ההזמנה לא תקין'); return false; }
+  }
+};
+setInterval(() => { if (document.visibilityState === 'visible') Sync.run(false); }, 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') Sync.run(false); });
 
 // =====================================================================
 // כללים (ספר הכללים)
 // =====================================================================
 function renderRules(app) {
   setHeader('ספר הכללים', false);
-  const sec = (title, fixed, checks) => `<div class="card"><h3>${title}</h3>
-    ${(fixed || []).map(f => `<div class="rule ${f.level}"><span class="dot ${f.level}"></span><div>${esc(f.text)}</div></div>`).join('')}
-    ${(checks || []).map(c => `<div class="rule ${c.level}"><span class="dot ${c.level}"></span><div><b>${esc(c.label)}</b>${c.min != null || c.max != null ? ` — ${c.min != null ? 'מינ׳ ' + c.min : ''}${c.min != null && c.max != null ? ', ' : ''}${c.max != null ? 'מקס׳ ' + c.max : ''} ס"מ` : ''}<br>${esc(c.msg)}</div></div>`).join('')}</div>`;
+  const ed = !!V.editRules;
+  const lvlTxt = { red: 'אסור', orange: 'דורש בדיקה', green: 'המלצה' };
+  const sec = (key, title) => {
+    const fixed = R().fixed[key] || [], checks = R().checks[key] || [];
+    if (!ed && !fixed.length && !checks.length) return '';
+    return `<div class="card"><h3>${title}</h3>
+    ${fixed.map((f, i) => `<div class="rule ${f.level}"><span class="dot ${f.level}"></span><div class="grow">${esc(f.text)}</div>
+      ${ed ? `<span class="note-ic" data-ef="${key}|${i}">✏️</span>` : ''}</div>`).join('')}
+    ${checks.map((c, i) => `<div class="rule ${c.level}"><span class="dot ${c.level}"></span><div class="grow"><b>${esc(c.label)}</b>${c.min != null || c.max != null ? ` — ${c.min != null ? 'מינ׳ ' + c.min : ''}${c.min != null && c.max != null ? ', ' : ''}${c.max != null ? 'מקס׳ ' + c.max : ''} ס"מ` : ''}<br>${esc(c.msg)}</div>
+      ${ed ? `<span class="note-ic" data-ec="${key}|${i}">✏️</span>` : ''}</div>`).join('')}
+    ${ed ? `<div class="row" style="margin-top:8px"><button class="btn sec sm" data-af="${key}">+ כלל</button><button class="btn sec sm" data-ac="${key}">+ בדיקת מידה</button></div>` : ''}</div>`;
+  };
   app.innerHTML = `
-    <h2>📏 ספר הכללים</h2>
+    <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">📏 ספר הכללים</h2>
+      <button class="btn ${ed ? '' : 'sec'} sm" id="edT">${ed ? '✓ סיום עריכה' : '✏️ עריכה'}</button></div>
+    ${ed ? '<div class="muted" style="margin-bottom:10px">מצב עריכה: לוחצים ✏️ כדי לשנות או למחוק, או מוסיפים כלל חדש. השינויים מתעדכנים גם אצל השותפים במאגר.</div>' : ''}
     <div class="card"><div class="rule red"><span class="dot red"></span><div>אדום = אסור</div></div>
       <div class="rule orange"><span class="dot orange"></span><div>כתום = דורש בדיקה</div></div>
       <div class="rule green"><span class="dot green"></span><div>ירוק = המלצה מקצועית</div></div></div>
-    ${sec('🏠 כללי — כל החדרים', FIXED_RULES._all, CHECKS._all)}
-    ${ROOM_CATS.filter(c => FIXED_RULES[c.id] || CHECKS[c.id]).map(c => sec(c.icon + ' ' + c.name, FIXED_RULES[c.id], CHECKS[c.id])).join('')}
+    ${sec('_all', '🏠 כללי — כל החדרים')}
+    ${ROOM_CATS.map(c => sec(c.id, c.icon + ' ' + c.name)).join('')}
     <div class="card"><h3>🛏️ מידות מיטות</h3>${BED_SIZES.map(b => `<div class="row"><span class="grow">${b.name}</span><b>${b.size}</b></div>`).join('')}</div>
+    ${ed && S.custom ? '<button class="btn danger full" id="resetR">שחזור הכללים המקוריים</button><div style="height:10px"></div>' : ''}
     <div class="muted">הכללים מבוססים על חומרי הקורס ועל תקנים בישראל. הם עוזרים בסקיצה, ולא מחליפים איש מקצוע מוסמך.</div>`;
+  $('#edT').onclick = () => { V.editRules = !ed; render(); };
+  app.querySelectorAll('[data-ef]').forEach(el => el.onclick = () => { const [k, i] = el.dataset.ef.split('|'); fixedRuleForm(k, +i); });
+  app.querySelectorAll('[data-ec]').forEach(el => el.onclick = () => { const [k, i] = el.dataset.ec.split('|'); checkRuleForm(k, +i); });
+  app.querySelectorAll('[data-af]').forEach(el => el.onclick = () => fixedRuleForm(el.dataset.af));
+  app.querySelectorAll('[data-ac]').forEach(el => el.onclick = () => checkRuleForm(el.dataset.ac));
+  if ($('#resetR')) $('#resetR').onclick = () => {
+    if (!confirm('לחזור לכללים המקוריים? כל השינויים שעשיתם יימחקו (גם אצל השותפים).')) return;
+    S.custom = { checks: clone(CHECKS), fixed: clone(FIXED_RULES), styles: [...STYLES], catCats: [...CATALOG_CATS] }; rulesChanged(); render();
+  };
+}
+const levelSelect = (v) => `<select id="lv"><option value="red" ${v === 'red' ? 'selected' : ''}>🔴 אדום — אסור</option><option value="orange" ${v === 'orange' ? 'selected' : ''}>🟠 כתום — דורש בדיקה</option><option value="green" ${v === 'green' || !v ? 'selected' : ''}>🟢 ירוק — המלצה</option></select>`;
+const roomSelect = (v) => `<select id="rk"><option value="_all" ${v === '_all' ? 'selected' : ''}>🏠 כל החדרים</option>${ROOM_CATS.map(c => `<option value="${c.id}" ${v === c.id ? 'selected' : ''}>${c.icon} ${c.name}</option>`).join('')}</select>`;
+function fixedRuleForm(key, idx) {
+  const C = editableRules(); const f = idx != null ? C.fixed[key][idx] : null;
+  modal(f ? 'עריכת כלל' : 'כלל חדש', `
+    <label>חדר</label>${roomSelect(key)}
+    <label>רמה</label>${levelSelect(f?.level)}
+    <label>הכלל</label><textarea id="tx">${esc(f?.text || '')}</textarea>
+    <div style="height:14px"></div><button class="btn full" id="ok">שמירה</button>
+    ${f ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקת הכלל</button>' : ''}`, (b, close) => {
+    $('#ok', b).onclick = () => {
+      const text = $('#tx', b).value.trim(); if (!text) return toast('צריך לכתוב את הכלל');
+      const nk = $('#rk', b).value, rule = { level: $('#lv', b).value, text };
+      if (f) C.fixed[key].splice(idx, 1);
+      (C.fixed[nk] = C.fixed[nk] || []).push(rule);
+      rulesChanged(); close(); render();
+    };
+    if (f) $('#del', b).onclick = () => { if (!confirm('למחוק את הכלל?')) return; C.fixed[key].splice(idx, 1); rulesChanged(); close(); render(); };
+  });
+}
+function checkRuleForm(key, idx) {
+  const C = editableRules(); const c = idx != null ? C.checks[key][idx] : null;
+  modal(c ? 'עריכת בדיקת מידה' : 'בדיקת מידה חדשה', `
+    <label>חדר</label>${roomSelect(key)}
+    <label>מה מודדים?</label><input id="lb" value="${esc(c?.label || '')}" placeholder="למשל: מרווח בין כיור לקיר">
+    <div class="grid2"><div><label>מינימום (ס"מ)</label><input id="mn" type="number" inputmode="numeric" value="${c?.min ?? ''}"></div>
+      <div><label>מקסימום (ס"מ)</label><input id="mx" type="number" inputmode="numeric" value="${c?.max ?? ''}"></div></div>
+    <label>רמה</label>${levelSelect(c?.level)}
+    <label>ההסבר שמופיע בהתרעה</label><textarea id="ms">${esc(c?.msg || '')}</textarea>
+    <div style="height:14px"></div><button class="btn full" id="ok">שמירה</button>
+    ${c ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקה</button>' : ''}`, (b, close) => {
+    $('#ok', b).onclick = () => {
+      const label = $('#lb', b).value.trim(); if (!label) return toast('צריך לכתוב מה מודדים');
+      const mn = $('#mn', b).value, mx = $('#mx', b).value;
+      if (mn === '' && mx === '') return toast('צריך מינימום או מקסימום');
+      const nk = $('#rk', b).value;
+      const rule = { key: c?.key || 'c_' + uid(), label, level: $('#lv', b).value, msg: $('#ms', b).value.trim() };
+      if (mn !== '') rule.min = +mn; if (mx !== '') rule.max = +mx;
+      if (c) C.checks[key].splice(idx, 1);
+      (C.checks[nk] = C.checks[nk] || []).push(rule);
+      rulesChanged(); close(); render();
+    };
+    if (c) $('#del', b).onclick = () => { if (!confirm('למחוק את בדיקת המידה?')) return; C.checks[key].splice(idx, 1); rulesChanged(); close(); render(); };
+  });
 }
 
 // =====================================================================
@@ -594,6 +813,25 @@ function renderSettings(app) {
       <div style="height:10px"></div><button class="btn sec full" id="test">בדיקת חיבור</button></div>
     <div class="card"><h3>📄 הדפסה</h3>
       <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="pn" style="width:auto" ${st.printNotes ? 'checked' : ''}> להדפיס הערות בתיק הפרויקט</label></div>
+    <div class="card"><h3>📋 רשימות לעריכה</h3>
+      <label>קטגוריות בקטלוג (שורה לכל קטגוריה)</label><textarea id="lcats" style="min-height:140px">${esc(R().catCats.join('\n'))}</textarea>
+      <label>סגנונות עיצוב (שורה לכל סגנון)</label><textarea id="lsty" style="min-height:140px">${esc(R().styles.join('\n'))}</textarea>
+      <div style="height:10px"></div><button class="btn sec full" id="saveLists">שמירת הרשימות</button>
+      <div class="muted" style="margin-top:6px">את הכללים והמידות עורכים בלשונית "כללים" ← ✏️ עריכה.</div></div>
+    <div class="card"><h3>🤝 מאגר משותף</h3>
+      ${Sync.ok() ? `<div class="rule green"><span class="dot green"></span><div>מחובר למאגר משותף${S.sync.last ? ' · סנכרון אחרון ' + new Date(S.sync.last).toLocaleString('he-IL') : ''}</div></div>
+        <button class="btn full" id="invite">📲 שליחת הזמנה בוואטסאפ</button><div style="height:8px"></div>
+        <button class="btn sec full" id="copyInv">📋 העתקת קוד ההזמנה</button><div style="height:8px"></div>
+        <button class="btn sec full" id="syncNow2">🔄 סנכרון עכשיו</button><div style="height:8px"></div>
+        <button class="btn danger full" id="leave">ניתוק מהמאגר</button>`
+      : `<div class="muted">הקטלוג מתעדכן אצל כל מי שמחובר לאותו מאגר.</div>
+        <label>קיבלת קוד הזמנה? מדביקים כאן:</label><textarea id="joinCode" style="min-height:60px" dir="ltr"></textarea>
+        <button class="btn full" id="join">הצטרפות</button>
+        <details style="margin-top:12px"><summary class="muted">הקמת מאגר חדש (פעם אחת, למנהל)</summary>
+          <label>Firebase Project ID</label><input id="fpid" dir="ltr" value="${esc(S.sync?.projectId || '')}">
+          <label>Firebase Web API Key</label><input id="fkey" dir="ltr" value="${esc(S.sync?.apiKey || '')}">
+          <div style="height:10px"></div><button class="btn sec full" id="create">יצירת מאגר משותף</button></details>`}
+    </div>
     <div class="card"><h3>💾 גיבוי ושחזור</h3>
       <div class="muted">חשוב במיוחד באייפון: שומרים גיבוי מדי פעם. אפשר גם לשלוח את הקובץ בוואטסאפ כדי להעביר פרויקטים לטלפון אחר.</div>
       <div style="height:10px"></div>
@@ -608,6 +846,32 @@ function renderSettings(app) {
   $('#model').onchange = e => { st.model = e.target.value.trim() || DEFAULT_MODEL; save(); };
   $('#pn').onchange = e => { st.printNotes = e.target.checked; save(); };
   $('#test').onclick = testKey;
+  if (Sync.ok()) {
+    $('#invite').onclick = () => {
+      const link = location.origin + location.pathname + '?join=' + encodeURIComponent(Sync.inviteCode());
+      const txt = `הזמנה למאגר המשותף של "מעצב חכם" 🤝\n\nאם האפליקציה מותקנת אצלך: פותחים אותה ← הגדרות ← מאגר משותף ← מדביקים את הקוד:\n${Sync.inviteCode()}\n\nאם עוד לא: פותחים את הקישור:\n${link}`;
+      location.href = 'https://wa.me/?text=' + encodeURIComponent(txt);
+    };
+    $('#copyInv').onclick = async () => { try { await navigator.clipboard.writeText(Sync.inviteCode()); toast('הקוד הועתק'); } catch { prompt('העתיקו את הקוד:', Sync.inviteCode()); } };
+    $('#syncNow2').onclick = () => Sync.run(true);
+    $('#leave').onclick = () => { if (confirm('להתנתק מהמאגר המשותף? המוצרים יישארו בטלפון.')) { S.sync = null; save(); render(); } };
+  } else {
+    $('#join').onclick = () => { if (Sync.join($('#joinCode').value)) render(); };
+    $('#create').onclick = async () => {
+      const projectId = $('#fpid').value.trim(), apiKey = $('#fkey').value.trim();
+      if (!projectId || !apiKey) return toast('צריך Project ID ו-API Key');
+      const code = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(x => x.toString(16).padStart(2, '0')).join('');
+      S.sync = { projectId, apiKey, code }; save();
+      try { await Sync.req('/items?pageSize=1'); toast('המאגר נוצר ✓ מעלה את הקטלוג…'); Sync.run(true); render(); }
+      catch (e) { S.sync = null; save(); toast('החיבור נכשל: ' + e.message, 5000); }
+    };
+  }
+  $('#saveLists').onclick = () => {
+    const lines = (id) => $(id).value.split('\n').map(x => x.trim()).filter(Boolean);
+    const cats = lines('#lcats'), sty = lines('#lsty');
+    if (!cats.length) return toast('צריך לפחות קטגוריה אחת');
+    const C = editableRules(); C.catCats = [...new Set(cats)]; C.styles = [...new Set(sty)]; rulesChanged(); toast('הרשימות נשמרו');
+  };
   $('#exp').onclick = () => exportBackup(S.projects, true);
   $('#imp').onclick = importBackup;
 }
@@ -675,7 +939,7 @@ async function printProject(p) {
   for (const r of p.rooms) {
     const c = catOf(r.cat);
     h += `<div class="pp"><h2>${c.icon} ${esc(r.name)}</h2><p>${c.name}${r.L ? ` · מידות: ${r.L}×${r.W}${r.H ? '×' + r.H : ''} ס"מ` : ''}</p>`;
-    const checks = [...(CHECKS[r.cat] || []), ...CHECKS._all].filter(ch => r.checks[ch.key] !== '' && r.checks[ch.key] != null);
+    const checks = [...(R().checks[r.cat] || []), ...R().checks._all].filter(ch => r.checks[ch.key] !== '' && r.checks[ch.key] != null);
     if (checks.length) h += `<table><tr><th>מידה</th><th>ערך</th><th>סטטוס</th></tr>${checks.map(ch => { const e = evalCheck(ch, r.checks[ch.key]); return `<tr><td>${esc(ch.label)}</td><td>${r.checks[ch.key]} ס"מ</td><td>${e?.ok ? 'תקין' : esc(e?.txt || '')}</td></tr>`; }).join('')}</table>`;
     for (const d of r.designs) {
       const items = (d.items || []).map(id => S.catalog.find(x => x.id === id)).filter(Boolean);
@@ -723,5 +987,8 @@ function showHelp() {
     if (st) S = { ...S, ...st, settings: { ...S.settings, ...(st.settings || {}) } };
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   } catch (e) { toast('שגיאה בפתיחת האחסון: ' + e.message, 5000); }
+  const jq = new URLSearchParams(location.search).get('join');
+  if (jq) { history.replaceState(null, '', location.pathname); if (!Sync.ok() || confirm('להצטרף למאגר המשותף החדש?')) Sync.join(jq); }
   render();
+  Sync.run(false);
 })();
