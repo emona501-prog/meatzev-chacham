@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -47,7 +47,7 @@ let S = { projects: [], catalog: [], settings: { apiKey: '', model: DEFAULT_MODE
 const clone = (o) => JSON.parse(JSON.stringify(o));
 function R() { return S.custom || { checks: CHECKS, fixed: FIXED_RULES, styles: STYLES, catCats: CATALOG_CATS }; }
 function editableRules() {
-  if (!S.custom) S.custom = { checks: clone(CHECKS), fixed: clone(FIXED_RULES), styles: [...STYLES], catCats: [...CATALOG_CATS], updated: 0 };
+  if (!S.custom) S.custom = { checks: clone(CHECKS), fixed: clone(FIXED_RULES), styles: [...STYLES], catCats: [...CATALOG_CATS], updated: 0, base: window.RULES_VERSION || 1 };
   return S.custom;
 }
 function rulesChanged() { S.custom.updated = Date.now(); save(); Sync.pushRules(); }
@@ -767,7 +767,7 @@ function renderRules(app) {
   app.querySelectorAll('[data-ac]').forEach(el => el.onclick = () => checkRuleForm(el.dataset.ac));
   if ($('#resetR')) $('#resetR').onclick = () => {
     if (!confirm('לחזור לכללים המקוריים? כל השינויים שעשיתם יימחקו (גם אצל השותפים).')) return;
-    S.custom = { checks: clone(CHECKS), fixed: clone(FIXED_RULES), styles: [...STYLES], catCats: [...CATALOG_CATS] }; rulesChanged(); render();
+    S.custom = { checks: clone(CHECKS), fixed: clone(FIXED_RULES), styles: [...STYLES], catCats: [...CATALOG_CATS], base: window.RULES_VERSION || 1 }; rulesChanged(); render();
   };
 }
 const levelSelect = (v) => `<select id="lv"><option value="red" ${v === 'red' ? 'selected' : ''}>🔴 אדום — אסור</option><option value="orange" ${v === 'orange' ? 'selected' : ''}>🟠 כתום — דורש בדיקה</option><option value="green" ${v === 'green' || !v ? 'selected' : ''}>🟢 ירוק — המלצה</option></select>`;
@@ -806,7 +806,7 @@ function checkRuleForm(key, idx) {
       const mn = $('#mn', b).value, mx = $('#mx', b).value;
       if (mn === '' && mx === '') return toast('צריך מינימום או מקסימום');
       const nk = $('#rk', b).value;
-      const rule = { key: c?.key || 'c_' + uid(), label, level: $('#lv', b).value, msg: $('#ms', b).value.trim() };
+      const rule = { key: c?.key || 'c_' + uid(), label, level: $('#lv', b).value, msg: $('#ms', b).value.trim(), edited: true };
       if (mn !== '') rule.min = +mn; if (mx !== '') rule.max = +mx;
       if (c) C.checks[key].splice(idx, 1);
       (C.checks[nk] = C.checks[nk] || []).push(rule);
@@ -1016,6 +1016,21 @@ function showHelp() {
   } catch (e) { toast('שגיאה בפתיחת האחסון: ' + e.message, 5000); }
   const jq = new URLSearchParams(location.search).get('join');
   if (jq) { history.replaceState(null, '', location.pathname); if (!Sync.ok() || confirm('להצטרף למאגר המשותף החדש?')) Sync.join(jq); }
+  migrateRules();
   render();
   Sync.run(false);
 })();
+
+// כשנוספים כללים חדשים לקובץ rules.js — מוסיפים אותם גם לכללים שנערכו, בלי למחוק עריכות
+function migrateRules() {
+  const C = S.custom; if (!C || (C.base || 1) >= (window.RULES_VERSION || 1)) return;
+  for (const [k, list] of Object.entries(FIXED_RULES)) {
+    C.fixed[k] = C.fixed[k] || [];
+    for (const r of list) if (!C.fixed[k].some(x => x.text === r.text)) C.fixed[k].push(clone(r));
+  }
+  for (const [k, list] of Object.entries(CHECKS)) {
+    C.checks[k] = C.checks[k] || [];
+    for (const r of list) { const i = C.checks[k].findIndex(x => x.key === r.key); if (i < 0) C.checks[k].push(clone(r)); else if (!C.checks[k][i].edited) C.checks[k][i] = clone(r); }
+  }
+  C.base = window.RULES_VERSION; C.updated = Date.now(); save(); Sync.pushRules();
+}
