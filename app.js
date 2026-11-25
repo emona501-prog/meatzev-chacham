@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.7';
+const APP_VERSION = '0.6.8';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -67,6 +67,18 @@ const fmtDate = (t) => new Date(t).toLocaleDateString('he-IL');
 const catOf = (id) => ROOM_CATS.find(c => c.id === id) || ROOM_CATS[ROOM_CATS.length - 1];
 function toast(msg, ms = 2500) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = msg; document.body.appendChild(d); setTimeout(() => d.remove(), ms); }
 
+function shrinkData(dataURL, max, q) {
+  return new Promise((res) => {
+    const im = new Image();
+    im.onload = () => {
+      const sc = Math.min(1, max / Math.max(im.width, im.height));
+      if (sc === 1 && dataURL.length < 400000) return res(dataURL);
+      const c = document.createElement('canvas'); c.width = Math.round(im.width * sc); c.height = Math.round(im.height * sc);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', q));
+    };
+    im.onerror = () => res(dataURL); im.src = dataURL;
+  });
+}
 function compressImage(file, max = 1600, q = 0.85) {
   return new Promise((res, rej) => {
     const fr = new FileReader();
@@ -509,20 +521,23 @@ async function geminiText(parts, json, onStatus) {
   AI_LOG = [];
   const addModel = (m) => { if (m && !models.includes(m)) models.push(m); };
   let busy = false, noFree = 0, wait = 0;
-  for (let round = 0; round < 4; round++) {
+  const deadline = Date.now() + 180000;
+  for (let round = 0; round < 3; round++) {
+    if (Date.now() > deadline) break;
     if (round) {
       const sec = Math.min(30, Math.max(wait, 5 * round));
-      for (let t = sec; t > 0; t--) { onStatus && onStatus(`השרתים של גוגל עמוסים. מנסה שוב בעוד ${t} שניות (${round}/3)…`); await new Promise(r => setTimeout(r, 1000)); }
+      for (let t = sec; t > 0; t--) { onStatus && onStatus(`השרתים של גוגל עמוסים. מנסה שוב בעוד ${t} שניות (${round}/2)…`); await new Promise(r => setTimeout(r, 1000)); }
     }
     noFree = 0;
     for (const model of models) {
+      if (Date.now() > deadline) break;
       onStatus && onStatus(`שולח ל-${model}…`);
       let res;
       try {
         res = await gFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, key,
-          JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } }), 75000);
+          JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } }), 45000);
       } catch (e) {
-        AI_LOG.push({ model, status: e.timeout ? 'timeout' : 'net', msg: e.timeout ? 'no answer in 75s' : String(e.message || e) });
+        AI_LOG.push({ model, status: e.timeout ? 'timeout' : 'net', msg: e.timeout ? 'no answer in 45s' : String(e.message || e) });
         if (e.timeout) { busy = true; continue; }
         throw new Error('אין חיבור לאינטרנט.');
       }
@@ -545,7 +560,7 @@ async function geminiText(parts, json, onStatus) {
     if (noFree && !busy) break;
   }
   if (noFree && !busy) throw new Error('לפרויקט של המפתח הזה אין מכסה חינמית (גוגל מחזירה limit 0). צריך מפתח מפרויקט אחר ב-AI Studio, או להפעיל חיוב.');
-  if (busy) throw new Error('גוגל לא ענתה גם אחרי כמה ניסיונות. פתחו "פרטים טכניים" למטה וצלמו מסך — זה יגיד בדיוק מה הבעיה.');
+  if (busy) throw new Error('השרתים החינמיים של גוגל עמוסים כרגע (ניסינו כמה מודלים במשך עד 3 דקות). נסו שוב בעוד כמה דקות. בגרסה בתשלום אין את העומס הזה.');
   throw new Error('לא נמצא מודל טקסט זמין למפתח הזה.');
 }
 async function aiPromptHelper(r, sel, ins, items, baseImg, refs = []) {
@@ -582,9 +597,11 @@ Return JSON only:
  "warnings_he": ["<any conflict between her request and the rules or the real dimensions; empty if none>"],
  "tips_he": ["<1-3 professional design tips relevant to this request>"]}`;
   const part = (d) => { const [h, b64] = d.split(','); return { inline_data: { mime_type: h.match(/data:(.*?);/)?.[1] || 'image/jpeg', data: b64 } }; };
-  const parts = [{ text: sys }, { text: 'Image 1 — the room:' }, part(baseImg)];
-  refs.forEach((x, i) => { if (x.img) { parts.push({ text: `Image ${i + 2} — ${x.item.name} (${x.item.cat}):` }); parts.push(part(x.img)); } });
-  const txt = await geminiText(parts, true, (m) => { const o = document.querySelector('#out .muted'); if (o) o.textContent = m; });
+  // לניתוח מספיקה תמונה קטנה — שולחים מהר יותר וגוגל עונה מהר יותר
+  const parts = [{ text: sys }, { text: 'Image 1 — the room:' }, part(await shrinkData(baseImg, 1024, 0.8))];
+  for (let i = 0; i < refs.length; i++) { const x = refs[i]; if (x.img) { parts.push({ text: `Image ${i + 2} — ${x.item.name} (${x.item.cat}):` }); parts.push(part(await shrinkData(x.img, 512, 0.8))); } }
+  const t0 = Date.now();
+  const txt = await geminiText(parts, true, (m) => { const o = document.querySelector('#out .muted'); if (o) o.textContent = `${m} · ${Math.round((Date.now() - t0) / 1000)} שנ'`; });
   try { return JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { return { prompt: txt, prompt_he: '', observations_he: [], warnings_he: [], tips_he: [] }; }
 }
 function renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close) {
