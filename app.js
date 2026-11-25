@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.7';
+const APP_VERSION = '0.7.9';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -52,9 +52,17 @@ const DB = {
 let S = { projects: [], catalog: [], settings: { apiKey: '', model: DEFAULT_MODEL, printNotes: true, introLogo: true, introPresenter: true } };
 // כללים ורשימות שניתנים לעריכה (נשמרים ב-S.custom ומסתנכרנים למאגר המשותף)
 const clone = (o) => JSON.parse(JSON.stringify(o));
-function R() { return S.custom || { checks: CHECKS, fixed: FIXED_RULES, styles: STYLES, catCats: CATALOG_CATS }; }
+const DEFAULT_SUBS = {
+  'תאורה': ['מנורות תלייה', 'מנורת תקרה', 'צמוד תקרה', 'מנורה עומדת', 'מנורות לילה', 'מנורות קיר', 'אהילים', 'בתי מנורה', 'נורות', 'מנורות סטנדרט', 'צבעי נורה', 'מנורות LED', 'פסי לד', 'פלורסנט']
+};
+function R() { return S.custom || { checks: CHECKS, fixed: FIXED_RULES, styles: STYLES, catCats: CATALOG_CATS, subCats: DEFAULT_SUBS }; }
+function subsOf(c) { const m = R().subCats || DEFAULT_SUBS; return (m && m[c]) || []; }
+// גווני אור לבחירה בסטודיו (נכנס להנחיה ל-AI)
+const LIGHT_TONES = [['', 'כמו בתמונה'], ['cool', 'לבן קר (6500K)'], ['neutral', 'לבן טבעי / שמנת (4000K)'], ['warm', 'צהוב-כתום חם (2700K)'], ['amber', 'ענבר חם מאוד (2200K)']];
+const LIGHT_EN = { cool: 'cool white light, about 6500K', neutral: 'neutral natural white / creamy light, about 4000K', warm: 'warm yellow-orange light, about 2700K', amber: 'very warm amber light, about 2200K, vintage filament glow' };
 function editableRules() {
   if (!S.custom) S.custom = { checks: clone(CHECKS), fixed: clone(FIXED_RULES), styles: [...STYLES], catCats: [...CATALOG_CATS], updated: 0, base: window.RULES_VERSION || 1 };
+  if (!S.custom.subCats) S.custom.subCats = clone(DEFAULT_SUBS);
   return S.custom;
 }
 function rulesChanged() { S.custom.updated = Date.now(); save(); Sync.pushRules(); }
@@ -446,6 +454,8 @@ function studio(p, r, fromDesign) {
     <div class="muted" style="margin-top:4px">ה-AI מתאר כל אלמנט בדיוק (חומר, צבע, דוגמה, גודל) ומכניס אותו להנחיה.</div>
     ${roomNotes ? `<label style="display:flex;gap:8px;align-items:center;color:var(--ink);margin-top:10px"><input type="checkbox" id="useNotes" checked style="width:auto"> לכלול את ההערות של החדר</label>
       <div class="muted" style="white-space:pre-wrap;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:13px">${esc(roomNotes)}</div>` : ''}
+    <label>💡 גוון האור (לא חובה)</label>
+    <div class="chips" id="tones">${LIGHT_TONES.map(([k, t]) => `<span class="chip ${(sel.tone || '') === k ? 'on' : ''}" data-tone="${k}">${t}</span>`).join('')}</div>
     <label>5. מה לשנות? (במילים שלך)</label>
     <textarea id="ins" placeholder="למשל: להחליף את הריצוף לאריח שבחרתי, לצבוע את הקיר מאחורי המיטה בבז' חם, להשאיר את הארון כמו שהוא">${esc('')}</textarea>
     <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="keep" checked style="width:auto"> לשנות רק מה שביקשתי, כל השאר נשאר בדיוק אותו דבר</label>
@@ -458,6 +468,7 @@ function studio(p, r, fromDesign) {
     <button class="btn sec full" id="goPrompt">📝 הכנת הנחיה מקצועית לג'מיני (חינם)</button>
     <div class="muted" style="margin-top:4px">המערכת מסתכלת על התמונה, בודקת מול הכללים, וכותבת הנחיה מדויקת להדבקה באפליקציית Gemini.</div>
     <div id="out"></div>`, async (b, close) => {
+    b.querySelectorAll('#tones [data-tone]').forEach(ch => ch.onclick = () => { sel.tone = ch.dataset.tone; b.querySelectorAll('#tones [data-tone]').forEach(x => x.classList.toggle('on', x === ch)); });
     b.querySelectorAll('#tierSel [data-t]').forEach(bt => bt.onclick = () => {
       S.settings.tier = bt.dataset.t; save();
       b.querySelectorAll('#tierSel [data-t]').forEach(x => x.classList.toggle('sec', x !== bt));
@@ -672,9 +683,9 @@ The prompt you write MUST:
 7. Respect the real dimensions and the professional rules below. Never move, remove or open structural/bearing walls or shelter (ממ"ד) walls.
 
 Room type: ${c.name}. Real size: ${r.L ? `${r.L} x ${r.W} cm, ceiling ${r.H || '?'} cm` : 'unknown'}.
-Style: ${sel.style || 'not specified — keep the existing style unless the request implies otherwise'}.
+Style: ${sel.style || 'not specified — keep the existing style unless the request implies otherwise'}.${sel.tone && LIGHT_EN[sel.tone] ? `\nLighting color requested: ${LIGHT_EN[sel.tone]} (all fixtures and bulbs; ambient light and reflections must match).` : ''}
 Products / elements to use (attached as reference images in this order; image 1 is the room). You can SEE these reference images below — for each one, describe it in the prompt precisely: material, exact color, finish (matte/gloss), pattern, texture, tile/plank size and layout, legs/frame, fabric — so Gemini reproduces it exactly:
-${items.length ? items.map((it, i) => `${i + 2}. ${it.name} (${it.cat}${it.model ? ', model ' + it.model : ''}${it.dims ? ', ' + it.dims : ''}${it.color ? ', ' + it.color : ''}${it.supplier ? ', supplier ' + it.supplier : ''}${it.note ? ', designer note: ' + it.note : ''}${it.photo ? ', photo taken by the designer' : ''})`).join('\n') : 'none'}
+${items.length ? items.map((it, i) => `${i + 2}. ${it.name} (${it.cat}${it.sub ? ' › ' + it.sub : ''}${it.model ? ', model ' + it.model : ''}${it.dims ? ', ' + it.dims : ''}${it.color ? ', ' + it.color : ''}${it.supplier ? ', supplier ' + it.supplier : ''}${it.note ? ', designer note: ' + it.note : ''}${it.photo ? ', photo taken by the designer' : ''})`).join('\n') : 'none'}
 Professional rules from her course (red = forbidden, orange = needs checking, green = recommendation):
 ${rules}
 
@@ -703,6 +714,7 @@ function localPrompt(r, sel, ins, refs) {
     sel.keep ? 'Change ONLY what is requested below. Everything else must stay identical. Do not add furniture or decor that was not requested.' : '',
     `Room: ${c.name}${r.L ? `, real size ${r.L}x${r.W} cm${r.H ? `, ceiling ${r.H} cm` : ''}` : ''}.`,
     sel.style ? `Style: ${sel.style}.` : '',
+    sel.tone && LIGHT_EN[sel.tone] ? `Light color: ${LIGHT_EN[sel.tone]} from all fixtures and bulbs, with matching ambient light and reflections.` : '',
     ins ? `Requested changes (in Hebrew): ${ins}` : '',
     ...refs.map((x, i) => `Image ${i + 2} is a real product/material: ${x.item.name} (${x.item.cat}${x.item.model ? ', model ' + x.item.model : ''}${x.item.color ? ', ' + x.item.color : ''})${x.item.note ? ' — ' + x.item.note : ''}. Copy it exactly as it looks in the photo: same material, color, finish, pattern and proportions.`),
     'Use realistic real-world scale and proportions. Photorealistic interior photography, natural lighting matching the original photo, realistic shadows and reflections, high detail.'
@@ -761,6 +773,7 @@ function buildPrompt(r, sel, ins, items) {
   if (sel.keep) lines.push('- Change ONLY what is requested below. Everything else must stay identical. Do NOT invent or add furniture, decor or objects that were not requested.');
   else lines.push('- You may add tasteful complementary decor that fits the requested style, but only real, common market products.');
   if (sel.style) lines.push(`Design style: ${sel.style}.`);
+  if (sel.tone && LIGHT_EN[sel.tone]) lines.push(`Lighting color: all light fixtures and bulbs emit ${LIGHT_EN[sel.tone]}; the room's ambient light and reflections match this color temperature realistically.`);
   if (items.length) {
     lines.push('Use these EXACT real products. Each one is shown in a reference image after the room photo, in this order. Reproduce their color, texture, pattern and shape faithfully; do not substitute them:');
     items.forEach((it, i) => lines.push(`${i + 1}. ${it.name} — category: ${it.cat}${it.dims ? ', size: ' + it.dims : ''}${it.color ? ', finish/color: ' + it.color : ''}${it.note ? ', note: ' + it.note : ''}${it.photo ? ' (photo of the real element)' : ''}`));
@@ -888,44 +901,51 @@ async function catalogImageData(file) {
   return d;
 }
 // הוספה / שינוי שם / מחיקה של קטגוריה בקטלוג (נשמר ומשותף דרך המאגר)
-function catForm(old) {
+function catForm(old, focusSubs) {
   const n = old ? S.catalog.filter(x => x.cat === old).length : 0;
-  modal(old ? 'עריכת קטגוריה' : 'קטגוריה חדשה', `
-    <label>${old ? 'שם הקטגוריה' : 'שם הקטגוריה — או הרבה קטגוריות במכה אחת'}</label>
-    ${old ? `<input id="cn" value="${esc(old)}">` : `<textarea id="cn" rows="3" placeholder="לדוגמה: קירות&#10;או כמה ביחד: נרות, פמוטים, מגשים, פסלים"></textarea>
-      <div class="muted" style="font-size:12px">אפשר להפריד בשורות, בפסיקים או בלוכסנים (/) — הכל יתפרק לבד לקטגוריות נפרדות.</div>`}
+  modal(old ? 'עריכת קטגוריה' : 'קטגוריות חדשות', `
+    ${old ? `<label>שם הקטגוריה</label><input id="cn" value="${esc(old)}">
+      <label>תתי-קטגוריות</label><textarea id="csub" rows="5" placeholder="לדוגמה:&#10;מנורות לילה, מנורה עומדת, אהילים">${esc(subsOf(old).join('\n'))}</textarea>
+      <div class="muted" style="font-size:12px">שורה לכל אחת, או הרבה במכה אחת עם פסיקים / לוכסנים.</div>`
+    : `<label>קטגוריה אחת — או הרבה במכה אחת</label><textarea id="cn" rows="5" placeholder="קירות&#10;נרות, פמוטים, מגשים&#10;תאורה: מנורות לילה, מנורה עומדת, אהילים"></textarea>
+      <div class="muted" style="font-size:12px">מפרידים בשורות, בפסיקים או בלוכסנים — הכל מתפרק לבד.<br>תתי-קטגוריות: כותבים את הראשית, נקודתיים, ואחריה את התתים.</div>`}
     <div class="row" style="margin-top:14px;gap:8px">
       <button class="btn grow" id="cSave">${old ? 'שמירה' : '+ הוספה'}</button>
       ${old ? `<button class="btn sec" id="cDel" style="color:#b3261e">🗑 מחיקה</button>` : ''}</div>
     ${old && n ? `<div class="muted" style="margin-top:8px">יש בקטגוריה ${n} מוצרים. במחיקה הם יעברו ל"אחר".</div>` : ''}`, (b, close) => {
-    const inp = b.querySelector('#cn'); setTimeout(() => inp.focus(), 50);
+    const inp = b.querySelector(focusSubs ? '#csub' : '#cn'); setTimeout(() => { inp.focus(); if (focusSubs) inp.setSelectionRange(inp.value.length, inp.value.length); }, 50);
     b.querySelector('#cSave').onclick = () => {
-      const names = splitList([inp.value]); const name = names[0];
-      if (!name) return toast('צריך לכתוב שם');
       const C = editableRules();
-      if (!old && names.length > 1) {
-        const add = names.filter(n => !C.catCats.includes(n)); const i = C.catCats.indexOf('אחר');
+      if (!old) {
+        const { cats, subs } = parseCatText(b.querySelector('#cn').value);
+        if (!cats.length) return toast('צריך לכתוב שם');
+        const add = cats.filter(c => !C.catCats.includes(c)); const i = C.catCats.indexOf('אחר');
         if (i >= 0) C.catCats.splice(i, 0, ...add); else C.catCats.push(...add);
-        rulesChanged(); close(); toast(`נוספו ${add.length} קטגוריות`); return go({ catFilter: '' });
+        let ns = 0; for (const [k, l] of Object.entries(subs)) { const cur = C.subCats[k] || []; const nn = l.filter(x => !cur.includes(x)); ns += nn.length; C.subCats[k] = [...cur, ...nn]; }
+        rulesChanged(); close(); toast([add.length ? `נוספו ${add.length} קטגוריות` : '', ns ? `${ns} תתי-קטגוריות` : ''].filter(Boolean).join(' · ') || 'כבר קיים');
+        return go({ catFilter: cats.length === 1 ? cats[0] : '', subFilter: '' });
       }
+      const name = b.querySelector('#cn').value.trim(); if (!name) return toast('צריך לכתוב שם');
       if (name !== old && C.catCats.includes(name)) return toast('כבר יש קטגוריה בשם הזה');
-      if (old) {
-        C.catCats = C.catCats.map(c => c === old ? name : c);
-        S.catalog.filter(x => x.cat === old).forEach(x => { x.cat = name; x.updated = Date.now(); Sync.pushItem(x); });
-      } else {
-        const i = C.catCats.indexOf('אחר');
-        if (i >= 0) C.catCats.splice(i, 0, name); else C.catCats.push(name);
-      }
-      rulesChanged(); close(); toast(old ? 'הקטגוריה עודכנה' : 'הקטגוריה נוספה'); go({ catFilter: name });
+      const newSubs = splitList(b.querySelector('#csub').value.split('\n').map(l => l.replace(/\s\/\s/g, ',')));
+      C.catCats = C.catCats.map(c => c === old ? name : c);
+      delete C.subCats[old]; if (newSubs.length) C.subCats[name] = newSubs;
+      S.catalog.filter(x => x.cat === old).forEach(x => {
+        let ch = false;
+        if (name !== old) { x.cat = name; ch = true; }
+        if (x.sub && !newSubs.includes(x.sub)) { x.sub = ''; ch = true; }
+        if (ch) { x.updated = Date.now(); Sync.pushItem(x); }
+      });
+      rulesChanged(); close(); toast('הקטגוריה עודכנה'); go({ catFilter: name, subFilter: '' });
     };
     const del = b.querySelector('#cDel');
     if (del) del.onclick = () => {
       if (!confirm(`למחוק את הקטגוריה "${old}"?`)) return;
       const C = editableRules();
-      C.catCats = C.catCats.filter(c => c !== old);
+      C.catCats = C.catCats.filter(c => c !== old); delete C.subCats[old];
       if (n && !C.catCats.includes('אחר')) C.catCats.push('אחר');
-      S.catalog.filter(x => x.cat === old).forEach(x => { x.cat = 'אחר'; x.updated = Date.now(); Sync.pushItem(x); });
-      rulesChanged(); close(); toast('הקטגוריה נמחקה'); go({ catFilter: '' });
+      S.catalog.filter(x => x.cat === old).forEach(x => { x.cat = 'אחר'; x.sub = ''; x.updated = Date.now(); Sync.pushItem(x); });
+      rulesChanged(); close(); toast('הקטגוריה נמחקה'); go({ catFilter: '', subFilter: '' });
     };
   });
 }
@@ -934,7 +954,8 @@ async function renderCatalog(app) {
   setHeader('קטלוג מוצרים', false);
   const cat = V.catFilter;
   const nRev = S.catalog.filter(x => x.review).length, nPend = S.catalog.filter(x => x.pending).length;
-  const list = S.catalog.filter(x => !cat || (cat === '__review' ? x.review : x.cat === cat)).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const sub = V.subFilter || '', subs = cat && cat !== '__review' ? subsOf(cat) : [];
+  const list = S.catalog.filter(x => !cat || (cat === '__review' ? x.review : x.cat === cat && (!sub || x.sub === sub))).sort((a, b) => (b.updated || 0) - (a.updated || 0));
   const count = (c) => S.catalog.filter(x => x.cat === c).length;
   app.innerHTML = `
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2>
@@ -950,7 +971,9 @@ async function renderCatalog(app) {
       ${nRev ? `<span class="chip ${cat === '__review' ? 'on' : ''}" data-c="__review" style="border-color:var(--orange);color:${cat === '__review' ? '#fff' : 'var(--orange)'};${cat === '__review' ? 'background:var(--orange)' : ''};font-weight:700">⚠️ לבירור (${nRev})</span>` : ''}
       ${R().catCats.map(c => `<span class="chip ${cat === c ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}${count(c) ? ` (${count(c)})` : ''}</span>`).join('')}
       <span class="chip" id="addCat" style="border-style:dashed;font-weight:700">＋ קטגוריה חדשה</span></div>
-    ${cat && cat !== '__review' ? `<div class="row" style="margin-bottom:10px"><span class="muted grow">קטגוריה: <b>${esc(cat)}</b></span><button class="btn sec sm" id="editCat">✏️ עריכת הקטגוריה</button></div>` : ''}
+    ${cat && cat !== '__review' ? `<div class="subbox"><div class="row" style="margin-bottom:8px"><span class="grow"><b>${esc(cat)}</b>${sub ? ` › ${esc(sub)}` : ''}</span><button class="btn sec sm" id="editCat">✏️ עריכה</button></div>
+      <div class="chips"><span class="chip ${!sub ? 'on' : ''}" data-s="">הכול</span>${subs.map(x => { const n = S.catalog.filter(i => i.cat === cat && i.sub === x).length; return `<span class="chip ${sub === x ? 'on' : ''}" data-s="${esc(x)}">${esc(x)}${n ? ` (${n})` : ''}</span>`; }).join('')}
+      <span class="chip" id="addSub" style="border-style:dashed">＋ תת-קטגוריה</span></div></div>` : ''}
     ${cat === '__review' ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div>אלה מוצרים שה-AI לא היה בטוח בהם. לוחצים על כל אחד, בודקים, מתקנים ושומרים — והסימון יורד.</div></div>` : ''}
     <div class="grid2" style="margin-bottom:12px">
       <button class="btn" id="bulk">📥 הוספת הרבה תמונות</button>
@@ -958,9 +981,11 @@ async function renderCatalog(app) {
     ${cat ? '' : '<div class="muted" style="margin-bottom:10px">טיפ: בוחרים קודם קטגוריה, ואז כל התמונות שמוסיפים נכנסות אליה.</div>'}
     <div class="swatches" id="clist"></div>
     ${list.length ? '' : '<div class="empty"><b>🧱</b>אין מוצרים בקטגוריה הזו עדיין.</div>'}`;
-  app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => go({ catFilter: c.dataset.c }));
-  $('#newI').onclick = () => itemForm(null, cat === '__review' ? '' : cat);
-  $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat);
+  app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => go({ catFilter: c.dataset.c, subFilter: '' }));
+  app.querySelectorAll('[data-s]').forEach(c => c.onclick = () => go({ subFilter: c.dataset.s }));
+  if ($('#addSub')) $('#addSub').onclick = () => catForm(cat, true);
+  $('#newI').onclick = () => itemForm(null, cat === '__review' ? '' : cat, sub);
+  $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat, sub);
   $('#sortIn').onclick = () => sortInbox();
   if ($('#syncNow3')) $('#syncNow3').onclick = async () => { await Sync.run(true); render(); };
   if ($('#resume')) $('#resume').onclick = () => resumeSort();
@@ -970,15 +995,19 @@ async function renderCatalog(app) {
   const cl = $('#clist');
   for (const it of list) {
     const d = document.createElement('div'); d.className = 'sw';
-    d.innerHTML = `<div class="c"><img loading="lazy"></div>${it.review ? `<span class="flag">${it.pending ? '⏳' : '!'}</span>` : ''}<div class="n">${esc(it.name)}</div>${it.model ? `<div class="m" dir="ltr">${esc(it.model)}</div>` : ''}`;
+    d.innerHTML = `<div class="c"><img loading="lazy"></div>${it.review ? `<span class="flag">${it.pending ? '⏳' : '!'}</span>` : ''}${it.angles?.length ? `<span class="spin3d" title="${it.angles.length + 1} זוויות">🔄</span>` : ''}<div class="n">${esc(it.name)}</div>${it.sub && !V.subFilter ? `<div class="m">${esc(it.sub)}</div>` : ''}${it.model ? `<div class="m" dir="ltr">${esc(it.model)}</div>` : ''}`;
     cl.appendChild(d);
     d.onclick = () => itemForm(it);
-    getImg(it.img).then(src => { d.querySelector('img').src = src || 'icon.svg'; if (!src && it.img) Sync.fetchImg(it.img).then(s2 => { if (s2) d.querySelector('img').src = s2; }); });
+    const im = d.querySelector('img'); im.onload = () => { const r = im.naturalWidth / im.naturalHeight; if (r > 1.5 || r < 0.67) im.classList.add('fit'); };
+    // ברשימה מציגים תמונה ממוזערת קטנה (חוסך זיכרון — לא קורס גם עם אלפי מוצרים). את המלאה טוענים רק כשפותחים מוצר.
+    if (it.th) im.src = it.th;
+    else getImg(it.img).then(async src => { src = src || (it.img ? await Sync.fetchImg(it.img) : ''); im.src = src || 'icon.svg'; if (src) { it.th = await makeThumb(src); save(); } });
   }
 }
 
 // =====================================================================
 // זיהוי כפילויות — "טביעת אצבע" של תמונה (dHash 64 ביט). תמונה זהה או כמעט זהה (גם אם הוקטנה/נדחסה) תיתן טביעה קרובה
+const makeThumb = (d) => shrinkData(d, 240, 0.72);
 async function imgHash(dataURL) {
   try {
     const im = await loadImg(dataURL);
@@ -1020,6 +1049,7 @@ Identify the product/material in the photo. It may be a shop shelf, a sample boa
 Return ONLY JSON with these keys (Hebrew values except where noted):
 {"name": short descriptive Hebrew product name (e.g. "גרניט פורצלן דמוי שיש קלקטה מבריק"),
  "category": EXACTLY one of: ${JSON.stringify(cats)},
+ "subcategory": if the chosen category has subcategories in this map, EXACTLY one of them, else "": ${JSON.stringify(Object.fromEntries(cats.filter(c => subsOf(c).length).map(c => [c, subsOf(c)])))},
  "model": model / series / SKU code exactly as printed in the photo (keep original Latin letters and digits), or "" if no code is visible,
  "brand": brand or supplier name if printed/visible, else "",
  "dims": size if printed or clearly standard (e.g. "60×120 ס\\"מ"), else "",
@@ -1032,6 +1062,7 @@ CRITICAL: never invent a model number, brand or price. Only copy them if they ar
   const txt = await geminiText([{ text: sys }, { inline_data: { mime_type: h.match(/data:(.*?);/)?.[1] || 'image/jpeg', data: b64 } }], true, onStatus);
   let j; try { j = JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { throw new Error('ה-AI החזיר תשובה לא מובנת. נסו שוב.'); }
   if (!cats.includes(j.category)) j.category = cats.includes('אחר') ? 'אחר' : cats[0];
+  j.sub = subsOf(j.category).includes(j.subcategory) ? j.subcategory : '';
   return j;
 }
 
@@ -1052,7 +1083,7 @@ Max 3 matches. If you cannot find a convincing match, return {"matches":[], "sur
 async function sortOne(it, data, useWeb, onStatus) {
   const reasons = [];
   const a = await aiIdentify(data, onStatus);
-  Object.assign(it, { name: a.name || it.name, cat: a.category || 'אחר', model: a.model || '', supplier: a.brand || '', dims: a.dims || '', color: a.color || '', price: a.price || '', note: [a.material, a.note].filter(Boolean).join(' · '), pending: false });
+  Object.assign(it, { name: a.name || it.name, cat: a.category || 'אחר', sub: a.sub || '', model: a.model || '', supplier: a.brand || '', dims: a.dims || '', color: a.color || '', price: a.price || '', note: [a.material, a.note].filter(Boolean).join(' · '), pending: false });
   if (a.confidence !== 'high') reasons.push(a.confidence === 'low' ? 'הזיהוי לא ודאי — לבדוק מה זה בדיוק' : 'זיהוי סביר אבל לא בטוח — לוודא');
   if (!it.model && useWeb) {
     try {
@@ -1085,7 +1116,7 @@ function sortInbox() {
         pr.innerHTML = `<div class="muted">שומר תמונה ${i + 1} מתוך ${files.length}…</div>`;
         const data = await catalogImageData(files[i]); const ph = await imgHash(data);
         if (await findDuplicate(ph)) { dups++; continue; }
-        const it = { id: uid(), name: 'ממתין למיון', cat: 'אחר', supplier: '', model: '', dims: '', color: '', price: '', link: '', note: '', ph, pending: true, review: true, reviewWhy: ['עוד לא מוין'], img: await putImg(data), updated: Date.now() };
+        const it = { id: uid(), name: 'ממתין למיון', cat: 'אחר', supplier: '', model: '', dims: '', color: '', price: '', link: '', note: '', ph, th: await makeThumb(data), pending: true, review: true, reviewWhy: ['עוד לא מוין'], img: await putImg(data), updated: Date.now() };
         S.catalog.push(it); Sync.pushItem(it, data); queue.push([it, data]);
       }
       save();
@@ -1121,7 +1152,7 @@ async function resumeSort() {
   });
 }
 
-async function bulkAdd(cat) {
+async function bulkAdd(cat, sub = '') {
   if (!cat) {
     return modal('לאיזו קטגוריה?', `<div class="chips">${R().catCats.map(c => `<span class="chip" data-c="${esc(c)}">${esc(c)}</span>`).join('')}</div>`, (b, close) => {
       b.querySelectorAll('[data-c]').forEach(ch => ch.onclick = () => { close(); V.catFilter = ch.dataset.c; render(); bulkAdd(ch.dataset.c); });
@@ -1137,12 +1168,12 @@ async function bulkAdd(cat) {
     const ph = await imgHash(data);
     const dup = await findDuplicate(ph);
     if (dup) { dups.push(dup.name); continue; }
-    const it = { id: uid(), name: `${cat} ${++n}`, cat, supplier: '', model: '', dims: '', color: '', price: '', link: '', note: '', ph, updated: Date.now() };
+    const it = { id: uid(), name: `${sub || cat} ${++n}`, cat, sub, supplier: '', model: '', dims: '', color: '', price: '', link: '', note: '', ph, th: await makeThumb(data), updated: Date.now() };
     if (useAI) {
       try {
         toast(`🤖 מזהה מוצר ${i + 1} מתוך ${files.length}…`, 20000);
         const a = await aiIdentify(data);
-        Object.assign(it, { name: a.name || it.name, model: a.model || '', supplier: a.brand || '', dims: a.dims || '', color: a.color || '', price: a.price || '', note: [a.material, a.note].filter(Boolean).join(' · ') });
+        Object.assign(it, { name: a.name || it.name, sub: subsOf(cat).includes(a.sub) ? a.sub : (it.sub || ''), model: a.model || '', supplier: a.brand || '', dims: a.dims || '', color: a.color || '', price: a.price || '', note: [a.material, a.note].filter(Boolean).join(' · ') });
       } catch { aiFail++; }
     }
     it.img = await putImg(data);
@@ -1155,11 +1186,27 @@ async function bulkAdd(cat) {
   if (dups.length || aiFail) alert(msg.join('\n')); else toast(msg[0], 3000);
 }
 
-function itemForm(it, defCat) {
+// 🔄 צפייה בזוויות "כמו תלת מימד": גוררים ימינה/שמאלה על התמונה והיא מתחלפת בין הזוויות
+function attachSpin(img, srcs, onChange) {
+  let i = 0, sx = null, si = 0;
+  const show = (n) => { if (!srcs.length) return; i = ((n % srcs.length) + srcs.length) % srcs.length; img.src = srcs[i]; onChange && onChange(i); };
+  img.style.touchAction = 'pan-y'; img.style.cursor = srcs.length > 1 ? 'grab' : '';
+  img.onpointerdown = (e) => { if (srcs.length < 2) return; sx = e.clientX; si = i; img.setPointerCapture(e.pointerId); };
+  img.onpointermove = (e) => { if (sx === null) return; const step = Math.max(22, img.clientWidth / (srcs.length * 1.6)); show(si + Math.round((sx - e.clientX) / step)); };
+  img.onpointerup = img.onpointercancel = () => { sx = null; };
+  show(0);
+  return { show, get i() { return i; } };
+}
+async function loadImgs(ids) { const out = []; for (const id of ids) { const d = await getImg(id) || await Sync.fetchImg(id); if (d) out.push(d); } return out; }
+
+function itemForm(it, defCat, defSub) {
   let newImg = null;
   modal(it ? 'עריכת מוצר' : 'מוצר חדש', `
-    <div id="imgBox" style="text-align:center"><img id="ip" style="max-width:100%;max-height:240px;border-radius:12px;display:none">
-      <button class="btn sec full" id="pickI" style="margin-top:8px">📷 ${it ? 'החלפת תמונה' : 'תמונת המוצר'}</button>
+    <div id="imgBox" style="text-align:center"><img id="ip" style="max-width:100%;max-height:260px;border-radius:12px;display:none;user-select:none;-webkit-user-drag:none">
+      <div id="spinHint" class="muted" style="font-size:12px;margin-top:4px"></div>
+      <div id="angStrip" class="angstrip"></div>
+      <div class="grid2" style="margin-top:8px"><button class="btn sec" id="pickI">📷 ${it ? 'החלפת תמונה' : 'תמונת המוצר'}</button>
+        <button class="btn sec" id="addAng">🔄 + זוויות נוספות</button></div>
       <button class="btn full" id="aiId" style="margin-top:8px;${it?.img ? '' : 'display:none'}">🤖 זיהוי אוטומטי מהתמונה</button>
       <div id="aiMsg" class="muted" style="margin-top:6px"></div></div>
     ${it?.review ? `<div class="rule orange" style="margin-top:10px"><span class="dot orange"></span><div><b>⚠️ לבירור:</b><br>${(it.reviewWhy || []).map(esc).join('<br>')}
@@ -1169,7 +1216,8 @@ function itemForm(it, defCat) {
       ${!it.web?.matches?.length && it.web?.links?.length ? `<div style="margin-top:6px">קישורים שעשויים לעזור: ${it.web.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title || 'קישור')}</a>`).join(' · ')}</div>` : ''}
       <div class="muted" style="font-size:12px;margin-top:6px">כשמסיימים לבדוק — לוחצים "שמירה" והסימון יורד.</div></div></div>` : ''}
     <label>שם המוצר</label><input id="in" value="${esc(it?.name || '')}" placeholder="למשל: גרניט פורצלן דמוי בטון 60×120">
-    <label>קטגוריה</label><select id="ic">${R().catCats.map(c => `<option ${(it?.cat || defCat) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+    <div class="grid2"><div><label>קטגוריה</label><select id="ic">${R().catCats.map(c => `<option ${(it?.cat || defCat) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+      <div><label>תת-קטגוריה</label><select id="isub"></select></div></div>
     <div class="grid2"><div><label>מספר דגם / מק"ט</label><input id="im" value="${esc(it?.model || '')}" dir="ltr" placeholder="CAL-60120"></div>
       <div><label>ספק / מותג</label><input id="is" value="${esc(it?.supplier || '')}"></div></div>
     <div class="grid2"><div><label>מידות</label><input id="id" value="${esc(it?.dims || '')}" placeholder="60×120 ס&quot;מ"></div>
@@ -1180,14 +1228,40 @@ function itemForm(it, defCat) {
     <div style="height:14px"></div><button class="btn full" id="ok">שמירה</button>
     ${it ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקת המוצר</button>' : ''}`, async (b, close) => {
     const ip = $('#ip', b);
-    if (it?.img) { ip.src = await getImg(it.img) || await Sync.fetchImg(it.img) || ''; ip.style.display = ip.src ? '' : 'none'; }
+    const fillSubs = (want) => { const l = subsOf($('#ic', b).value); $('#isub', b).innerHTML = `<option value="">—</option>` + l.map(x => `<option ${x === want ? 'selected' : ''}>${esc(x)}</option>`).join(''); $('#isub', b).disabled = !l.length; };
+    fillSubs(it?.sub ?? defSub); $('#ic', b).onchange = () => fillSubs('');
+    let mainSrc = it?.img ? (await getImg(it.img) || await Sync.fetchImg(it.img) || '') : '';
+    let angIds = [...(it?.angles || [])], angSrcs = await loadImgs(angIds), newAngs = [], removed = [];
+    let spin = null;
+    const refreshViews = () => {
+      const srcs = [mainSrc, ...angSrcs, ...newAngs].filter(Boolean);
+      ip.style.display = srcs.length ? '' : 'none';
+      $('#spinHint', b).textContent = srcs.length > 1 ? `↔ גוררים על התמונה כדי לסובב · ${srcs.length} זוויות` : '';
+      const strip = $('#angStrip', b);
+      const all = [{ s: mainSrc, main: true }, ...angSrcs.map((s, k) => ({ s, k, old: true })), ...newAngs.map((s, k) => ({ s, k, nw: true }))].filter(x => x.s);
+      strip.innerHTML = all.length > 1 ? all.map((x, j) => `<div class="ang" data-j="${j}"><img src="${x.s}">${x.main ? '' : `<button data-rm="${j}">✕</button>`}</div>`).join('') : '';
+      spin = attachSpin(ip, srcs, (n) => strip.querySelectorAll('.ang').forEach((e, j) => e.classList.toggle('on', j === n)));
+      strip.querySelectorAll('.ang').forEach(e => e.onclick = (ev) => { if (ev.target.dataset.rm) return; spin.show(+e.dataset.j); });
+      strip.querySelectorAll('[data-rm]').forEach(btn => btn.onclick = () => {
+        const x = all[+btn.dataset.rm];
+        if (x.old) { removed.push(angIds[x.k]); angIds.splice(x.k, 1); angSrcs.splice(x.k, 1); } else newAngs.splice(x.k, 1);
+        refreshViews();
+      });
+    };
+    refreshViews();
+    $('#addAng', b).onclick = async () => {
+      const files = await pickPhoto(true); if (!files.length) return;
+      for (const f of files) newAngs.push(await catalogImageData(f));
+      if (!mainSrc && !newImg) { newImg = newAngs.shift(); mainSrc = newImg; }
+      refreshViews(); $('#aiId', b).style.display = '';
+    };
     let newHash = '';
     $('#pickI', b).onclick = async () => {
       const [f] = await pickPhoto(); if (!f) return;
       const data = await catalogImageData(f); const h = await imgHash(data);
       const dup = await findDuplicate(h, it?.id);
       if (dup && !confirm(`התמונה הזו כבר קיימת בקטלוג:\n"${dup.name}"${dup.model ? ' · ' + dup.model : ''} (${dup.cat})\n\nלהשתמש בה בכל זאת?`)) return;
-      newImg = data; newHash = h; ip.src = newImg; ip.style.display = ''; $('#aiId', b).style.display = '';
+      newImg = data; newHash = h; mainSrc = data; refreshViews(); $('#aiId', b).style.display = '';
     };
     b.querySelectorAll('[data-m]').forEach(bt => bt.onclick = () => {
       const m = it.web.matches[+bt.dataset.m];
@@ -1195,13 +1269,13 @@ function itemForm(it, defCat) {
       toast('מולא — לוודא בקישור ואז לשמור');
     });
     $('#aiId', b).onclick = async () => {
-      const src = newImg || ip.src; if (!src) return toast('קודם בוחרים תמונה');
+      const src = newImg || mainSrc; if (!src) return toast('קודם בוחרים תמונה');
       const btn = $('#aiId', b), msg = $('#aiMsg', b); btn.disabled = true; msg.textContent = '🤖 מזהה…';
       try {
         const a = await aiIdentify(src, (m) => msg.textContent = m);
         const set = (id, v) => { if (v) $(id, b).value = v; };
         set('#in', a.name); set('#im', a.model); set('#is', a.brand); set('#id', a.dims); set('#ico', a.color); set('#ipr', a.price);
-        if (a.category) $('#ic', b).value = a.category;
+        if (a.category) { $('#ic', b).value = a.category; fillSubs(a.sub || ''); }
         const note = [a.material, a.note].filter(Boolean).join(' · '); if (note && !$('#ino', b).value.trim()) $('#ino', b).value = note;
         msg.innerHTML = `✓ זוהה (${a.confidence === 'high' ? 'ביטחון גבוה' : a.confidence === 'low' ? 'ביטחון נמוך — כדאי לבדוק' : 'ביטחון בינוני'}). ${a.model ? '' : 'לא נמצא מספר דגם כתוב בתמונה — אפשר לצלם את המדבקה/התווית ולנסות שוב.'} בודקים ומתקנים לפני שמירה.`;
       } catch (e) { msg.textContent = e.message; }
@@ -1209,11 +1283,13 @@ function itemForm(it, defCat) {
     };
     $('#ok', b).onclick = async () => {
       const name = $('#in', b).value.trim(); if (!name) return toast('צריך שם למוצר');
-      const d = { review: false, reviewWhy: [], pending: false, name, cat: $('#ic', b).value, model: $('#im', b).value.trim(), supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
-      if (newImg) { d.img = await putImg(newImg); d.ph = newHash || await imgHash(newImg); }
+      const d = { review: false, reviewWhy: [], pending: false, name, cat: $('#ic', b).value, sub: $('#isub', b).value, model: $('#im', b).value.trim(), supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
+      if (newImg) { d.img = await putImg(newImg); d.ph = newHash || await imgHash(newImg); d.th = await makeThumb(newImg); }
+      for (const a of newAngs) angIds.push(await putImg(a));
+      d.angles = angIds; for (const r of removed) delImg(r);
       let target = it;
       if (it) Object.assign(it, d); else { target = { id: uid(), ...d }; S.catalog.push(target); }
-      Sync.pushItem(target, newImg);
+      Sync.pushItem(target, newImg || (newAngs.length ? mainSrc : null));
       save(); close(); render();
     };
     if (it) $('#del', b).onclick = async () => {
@@ -1254,6 +1330,7 @@ const Sync = {
     if (!this.ok()) return;
     try {
       if (imgData && it.img) await this.req(`/imgs/${it.img}`, { method: 'PATCH', body: JSON.stringify({ fields: { data: { stringValue: imgData } } }) });
+      if (imgData) for (const a of it.angles || []) { const ad = await getImg(a); if (ad) await this.req(`/imgs/${a}`, { method: 'PATCH', body: JSON.stringify({ fields: { data: { stringValue: ad } } }) }); }
       await this.req(`/items/${it.id}`, { method: 'PATCH', body: JSON.stringify({ fields: {
         meta: { stringValue: JSON.stringify(this.meta(it)) }, img: { stringValue: it.img || '' },
         updated: { integerValue: String(it.updated || Date.now()) }, deleted: { booleanValue: false } } }) });
@@ -1479,7 +1556,9 @@ function renderSettings(app) {
     <div class="card"><h3>📄 הדפסה</h3>
       <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="pn" style="width:auto" ${st.printNotes ? 'checked' : ''}> להדפיס הערות בתיק הפרויקט</label></div>
     <div class="card"><h3>📋 רשימות לעריכה</h3>
-      <label>קטגוריות בקטלוג (שורה לכל קטגוריה)</label><textarea id="lcats" style="min-height:140px">${esc(R().catCats.join('\n'))}</textarea>
+      <label>קטגוריות בקטלוג</label>
+      <div class="muted" style="font-size:12px">שורה לכל קטגוריה ראשית. תתי-קטגוריות כותבים אחרי נקודתיים, מופרדות בפסיק או לוכסן.<br>לדוגמה: <b>תאורה: מנורות לילה, מנורה עומדת, אהילים</b></div>
+      <textarea id="lcats" style="min-height:180px">${esc(R().catCats.map(c => subsOf(c).length ? `${c}: ${subsOf(c).join(', ')}` : c).join('\n'))}</textarea>
       <label>סגנונות עיצוב (שורה לכל סגנון)</label><textarea id="lsty" style="min-height:140px">${esc(R().styles.join('\n'))}</textarea>
       <div style="height:10px"></div><button class="btn sec full" id="saveLists">שמירת הרשימות</button>
       <div class="muted" style="margin-top:6px">את הכללים והמידות עורכים בלשונית "כללים" ← ✏️ עריכה.</div></div>
@@ -1550,9 +1629,10 @@ function renderSettings(app) {
   }
   $('#saveLists').onclick = () => {
     const lines = (id) => splitList($(id).value.split('\n'));
-    const cats = lines('#lcats'), sty = lines('#lsty');
+    const { cats, subs } = parseCatText($('#lcats').value), sty = lines('#lsty');
     if (!cats.length) return toast('צריך לפחות קטגוריה אחת');
-    const C = editableRules(); C.catCats = cats; C.styles = sty; rulesChanged(); toast(`הרשימות נשמרו · ${cats.length} קטגוריות`); render();
+    const C = editableRules(); C.catCats = cats; C.subCats = subs; C.styles = sty; rulesChanged();
+    toast(`הרשימות נשמרו · ${cats.length} קטגוריות${Object.keys(subs).length ? ` · ${Object.values(subs).flat().length} תתי-קטגוריות` : ''}`); render();
   };
   $('#exp').onclick = () => exportBackup(S.projects, true);
   $('#imp').onclick = importBackup;
@@ -1612,8 +1692,10 @@ function importBackup() {
         else S.projects.push(p);
         added++;
       }
-      for (const c of data.catalog || []) if (!S.catalog.some(x => x.id === c.id)) S.catalog.push(c);
-      save(); toast(`שוחזרו ${added} פרויקטים`); render();
+      let cAdded = 0;
+      for (const c of data.catalog || []) if (!S.catalog.some(x => x.id === c.id)) { c.synced = false; S.catalog.push(c); cAdded++; }
+      save(); toast([added ? `שוחזרו ${added} פרויקטים` : '', cAdded ? `נוספו ${cAdded} מוצרים לקטלוג` : ''].filter(Boolean).join(' · ') || 'אין משהו חדש בקובץ', 3500); render();
+      if (cAdded) Sync.run(false);
     } catch { toast('הקובץ לא תקין'); }
   };
   i.click();
@@ -1702,6 +1784,22 @@ function splitList(arr) {
     for (const p of parts) { const t = p.trim().replace(/^[-–•*·]+\s*/, ''); if (t && !out.includes(t)) out.push(t); }
   }
   return out;
+}
+// "תאורה: א, ב / ג" → קטגוריה ראשית עם תתי-קטגוריות. שורה בלי נקודתיים = קטגוריות ראשיות (אפשר כמה בשורה).
+function parseCatText(txt) {
+  const cats = [], subs = {};
+  for (const line of String(txt).split('\n')) {
+    const l = line.trim(); if (!l) continue;
+    const m = l.match(/^([^:：]+)[:：](.*)$/);
+    if (m) {
+      const main = m[1].trim(); if (!main) continue;
+      if (!cats.includes(main)) cats.push(main);
+      const list = splitList([m[2].replace(/\s\/\s/g, ',')]);
+      if (list.length) subs[main] = [...new Set([...(subs[main] || []), ...list])];
+    } else for (const c of splitList([l])) if (!cats.includes(c)) cats.push(c);
+  }
+  const o = cats.indexOf('אחר'); if (o >= 0 && o !== cats.length - 1) { cats.splice(o, 1); cats.push('אחר'); }
+  return { cats, subs };
 }
 function fixLists() {
   const C = S.custom; if (!C) return;
