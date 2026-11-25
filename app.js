@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.2';
+const APP_VERSION = '0.6.3';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -720,6 +720,42 @@ async function catalogImageData(file) {
   if (d.length > 850000) d = await compressImage(file, 800, 0.7);
   return d;
 }
+// הוספה / שינוי שם / מחיקה של קטגוריה בקטלוג (נשמר ומשותף דרך המאגר)
+function catForm(old) {
+  const n = old ? S.catalog.filter(x => x.cat === old).length : 0;
+  modal(old ? 'עריכת קטגוריה' : 'קטגוריה חדשה', `
+    <label>שם הקטגוריה</label><input id="cn" value="${esc(old || '')}" placeholder="לדוגמה: קירות">
+    <div class="row" style="margin-top:14px;gap:8px">
+      <button class="btn grow" id="cSave">${old ? 'שמירה' : '+ הוספה'}</button>
+      ${old ? `<button class="btn sec" id="cDel" style="color:#b3261e">🗑 מחיקה</button>` : ''}</div>
+    ${old && n ? `<div class="muted" style="margin-top:8px">יש בקטגוריה ${n} מוצרים. במחיקה הם יעברו ל"אחר".</div>` : ''}`, (b, close) => {
+    const inp = b.querySelector('#cn'); setTimeout(() => inp.focus(), 50);
+    b.querySelector('#cSave').onclick = () => {
+      const name = inp.value.trim();
+      if (!name) return toast('צריך לכתוב שם');
+      const C = editableRules();
+      if (name !== old && C.catCats.includes(name)) return toast('כבר יש קטגוריה בשם הזה');
+      if (old) {
+        C.catCats = C.catCats.map(c => c === old ? name : c);
+        S.catalog.filter(x => x.cat === old).forEach(x => { x.cat = name; x.updated = Date.now(); Sync.pushItem(x); });
+      } else {
+        const i = C.catCats.indexOf('אחר');
+        if (i >= 0) C.catCats.splice(i, 0, name); else C.catCats.push(name);
+      }
+      rulesChanged(); close(); toast(old ? 'הקטגוריה עודכנה' : 'הקטגוריה נוספה'); go({ catFilter: name });
+    };
+    const del = b.querySelector('#cDel');
+    if (del) del.onclick = () => {
+      if (!confirm(`למחוק את הקטגוריה "${old}"?`)) return;
+      const C = editableRules();
+      C.catCats = C.catCats.filter(c => c !== old);
+      if (n && !C.catCats.includes('אחר')) C.catCats.push('אחר');
+      S.catalog.filter(x => x.cat === old).forEach(x => { x.cat = 'אחר'; x.updated = Date.now(); Sync.pushItem(x); });
+      rulesChanged(); close(); toast('הקטגוריה נמחקה'); go({ catFilter: '' });
+    };
+  });
+}
+
 async function renderCatalog(app) {
   setHeader('קטלוג מוצרים', false);
   const cat = V.catFilter;
@@ -731,7 +767,9 @@ async function renderCatalog(app) {
     <div class="muted" style="margin-bottom:10px">מוצרים אמיתיים מהשוק. ה-AI משתמש בתמונה של המוצר ולא ממציא משהו אחר.
       ${S.sync?.code ? '<br>🤝 המאגר משותף — כל מה שמוסיפים כאן מתעדכן אצל כל השותפים.' : ''}</div>
     <div class="chips" style="margin-bottom:12px"><span class="chip ${!cat ? 'on' : ''}" data-c="">הכול (${S.catalog.length})</span>
-      ${R().catCats.map(c => `<span class="chip ${cat === c ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}${count(c) ? ` (${count(c)})` : ''}</span>`).join('')}</div>
+      ${R().catCats.map(c => `<span class="chip ${cat === c ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}${count(c) ? ` (${count(c)})` : ''}</span>`).join('')}
+      <span class="chip" id="addCat" style="border-style:dashed;font-weight:700">＋ קטגוריה חדשה</span></div>
+    ${cat ? `<div class="row" style="margin-bottom:10px"><span class="muted grow">קטגוריה: <b>${esc(cat)}</b></span><button class="btn sec sm" id="editCat">✏️ עריכת הקטגוריה</button></div>` : ''}
     <div class="grid2" style="margin-bottom:12px">
       <button class="btn" id="bulk">📥 הוספת הרבה תמונות</button>
       <button class="btn sec" id="newI">+ מוצר עם פרטים</button></div>
@@ -741,6 +779,8 @@ async function renderCatalog(app) {
   app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => go({ catFilter: c.dataset.c }));
   $('#newI').onclick = () => itemForm(null, cat);
   $('#bulk').onclick = () => bulkAdd(cat);
+  $('#addCat').onclick = () => catForm(null);
+  if ($('#editCat')) $('#editCat').onclick = () => catForm(cat);
   if ($('#syncNow')) $('#syncNow').onclick = () => Sync.run(true);
   const cl = $('#clist');
   for (const it of list) {
