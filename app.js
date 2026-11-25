@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.8';
+const APP_VERSION = '0.6.9';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -459,7 +459,9 @@ function studio(p, r, fromDesign) {
         const res = await aiPromptHelper(r, sel, ins, items, baseImg, refs);
         renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close);
       } catch (e) {
-        out.innerHTML = `<div class="rule red" style="margin-top:12px"><span class="dot red"></span><div>${esc(e.message)}</div></div>${aiLogHtml()}`;
+        out.innerHTML = `<div class="rule red" style="margin-top:12px"><span class="dot red"></span><div>${esc(e.message)}</div></div>
+          <button class="btn full" id="localP" style="margin-top:10px">⚡ הנחיה בסיסית מיידית (בלי AI, בלי המתנה)</button>${aiLogHtml()}`;
+        $('#localP', out).onclick = async () => { const baseImg = await getImg(sel.base); const refs = await gatherRefs(); renderPromptResult(out, localPrompt(r, sel, ins, refs), baseImg, refs, p, r, sel, ins, close); };
       } finally { btn.disabled = false; }
     };
     $('#go', b).onclick = async () => {
@@ -603,6 +605,21 @@ Return JSON only:
   const t0 = Date.now();
   const txt = await geminiText(parts, true, (m) => { const o = document.querySelector('#out .muted'); if (o) o.textContent = `${m} · ${Math.round((Date.now() - t0) / 1000)} שנ'`; });
   try { return JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { return { prompt: txt, prompt_he: '', observations_he: [], warnings_he: [], tips_he: [] }; }
+}
+// הנחיה מוכנה בלי AI — מיידית, בלי עומסים. ג'מיני מבין עברית, אז הבקשה נשארת במילים שלה
+function localPrompt(r, sel, ins, refs) {
+  const c = catOf(r.cat);
+  const lines = [
+    'Edit the attached room photo (image 1). Do NOT create a new image.',
+    'Keep exactly the same camera angle, perspective, framing, walls, windows, doors, ceiling, room size and proportions.',
+    sel.keep ? 'Change ONLY what is requested below. Everything else must stay identical. Do not add furniture or decor that was not requested.' : '',
+    `Room: ${c.name}${r.L ? `, real size ${r.L}x${r.W} cm${r.H ? `, ceiling ${r.H} cm` : ''}` : ''}.`,
+    sel.style ? `Style: ${sel.style}.` : '',
+    ins ? `Requested changes (in Hebrew): ${ins}` : '',
+    ...refs.map((x, i) => `Image ${i + 2} is a real product/material: ${x.item.name} (${x.item.cat})${x.item.note ? ' — ' + x.item.note : ''}. Copy it exactly as it looks in the photo: same material, color, finish, pattern and proportions.`),
+    'Use realistic real-world scale and proportions. Photorealistic interior photography, natural lighting matching the original photo, realistic shadows and reflections, high detail.'
+  ].filter(Boolean);
+  return { prompt: lines.join('\n'), prompt_he: '', observations_he: [], warnings_he: [], tips_he: ['זו הנחיה בסיסית שנבנתה בלי AI. כשהשרתים פנויים, ההנחיה המקצועית מנתחת גם את התמונה ובודקת מול הכללים.'] };
 }
 function renderPromptResult(out, res, baseImg, refs, p, r, sel, ins, close) {
   const li = (a) => (a || []).filter(Boolean).map(x => `<li>${esc(x)}</li>`).join('');
