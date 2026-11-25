@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.5.2';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -821,7 +821,7 @@ function checkRuleForm(key, idx) {
 // הגדרות + גיבוי
 // =====================================================================
 function renderSettings(app) {
-  setHeader('הגדרות', false);
+  setHeader('הגדרות · גרסה ' + APP_VERSION, false);
   const st = S.settings;
   app.innerHTML = `
     <div class="card"><h3>🤖 מנוע ה-AI (Google Gemini)</h3>
@@ -1106,5 +1106,7 @@ async function doUpdate() {
   try { save(); await new Promise(r => setTimeout(r, 400)); } catch {}
   try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch {}
   try { const regs = await navigator.serviceWorker?.getRegistrations(); for (const r of regs || []) await r.unregister(); } catch {}
+  // מושכים מחדש את כל הקבצים מהשרת, בלי זיכרון מטמון של הדפדפן
+  try { await Promise.all(['./', 'index.html', 'app.js', 'rules.js', 'plan.js', 'sw.js', 'manifest.webmanifest', 'version.json', 'media/logo.png', 'apple-touch-icon.png'].map(u => fetch(u, { cache: 'reload' }).catch(() => {}))); } catch {}
   location.replace(location.pathname + '?v=' + Date.now());
 }
