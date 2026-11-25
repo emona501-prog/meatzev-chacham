@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.5';
+const APP_VERSION = '0.6.6';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 
 // ---------------- אחסון (IndexedDB) ----------------
@@ -480,6 +480,15 @@ function studio(p, r, fromDesign) {
 // ---------- עוזר הנחיות (מודל טקסט+ראייה, בשכבה החינמית) ----------
 const TEXT_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 // fetch עם הגבלת זמן — כדי שבקשה תקועה לא תתקע את כל האפליקציה
+// בקשה "פשוטה" בלי כותרות מיוחדות — עוקפת חסימות של חלק מהמסננים/רשתות
+async function gFetch(url, key, body, ms) {
+  try {
+    return await fetchT(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body }, ms);
+  } catch (e) {
+    if (e.timeout) throw e;
+    return await fetchT(url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body }, ms);
+  }
+}
 async function fetchT(url, opts, ms) {
   const ac = new AbortController(); const t = setTimeout(() => ac.abort(), ms);
   try { return await fetch(url, { ...opts, signal: ac.signal }); }
@@ -507,10 +516,8 @@ async function geminiText(parts, json, onStatus) {
       onStatus && onStatus(`שולח ל-${model}…`);
       let res;
       try {
-        res = await fetchT(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-          body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } })
-        }, 75000);
+        res = await gFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, key,
+          JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: json ? { responseMimeType: 'application/json', temperature: 0.4 } : { temperature: 0.4 } }), 75000);
       } catch (e) {
         AI_LOG.push({ model, status: e.timeout ? 'timeout' : 'net', msg: e.timeout ? 'no answer in 75s' : String(e.message || e) });
         if (e.timeout) { busy = true; continue; }
@@ -1177,12 +1184,12 @@ async function testKey() {
     for (const m of TEXT_MODELS) {
       const row = document.createElement('div'); row.className = 'rule'; row.innerHTML = `<span class="dot"></span><div dir="ltr" style="text-align:left"><b>${m}</b> …</div>`; box.appendChild(row);
       try {
-        const r = await fetchT(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key.trim() }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK' }] }], generationConfig: { maxOutputTokens: 20 } }) }, 20000);
+        const r = await gFetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, key.trim(), JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the word OK' }] }], generationConfig: { maxOutputTokens: 20 } }), 20000);
         const j = await r.json().catch(() => ({}));
         const good = r.ok && j?.candidates; if (good) { if (!okAny) { S.settings.textModel = m; save(); } okAny = true; }
         row.className = 'rule ' + (good ? 'green' : 'red'); row.querySelector('.dot').className = 'dot ' + (good ? 'green' : 'red');
         row.querySelector('div').innerHTML = `<b>${m}</b> — ${good ? '✓ עובד' : esc(r.status + ' ' + (j?.error?.message || '').slice(0, 220))}`;
-      } catch (e) { row.className = 'rule red'; row.querySelector('.dot').className = 'dot red'; row.querySelector('div').innerHTML = `<b>${m}</b> — ${e.timeout ? 'לא ענה תוך 20 שניות' : 'אין חיבור'}`; }
+      } catch (e) { row.className = 'rule red'; row.querySelector('.dot').className = 'dot red'; row.querySelector('div').innerHTML = `<b>${m}</b> — ${e.timeout ? 'לא ענה תוך 20 שניות' : 'אין חיבור (' + esc(String(e.message || e).slice(0, 80)) + ')'}`; }
     }
     const s2 = document.createElement('div'); s2.style.marginTop = '10px'; s2.innerHTML = okAny ? '<b>✓ יש מודל חינמי שעובד — הכנת ההנחיה תשתמש בו.</b>' : '<b>אף מודל לא ענה. צלמו את המסך הזה ושלחו.</b>'; box.appendChild(s2);
   });
