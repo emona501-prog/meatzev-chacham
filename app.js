@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.4';
+const APP_VERSION = '0.7.5';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -934,6 +934,8 @@ async function renderCatalog(app) {
       ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄 סנכרון</button>` : ''}</div>
     <div class="muted" style="margin-bottom:10px">מוצרים אמיתיים מהשוק. ה-AI משתמש בתמונה של המוצר ולא ממציא משהו אחר.
       ${S.sync?.code ? '<br>🤝 המאגר משותף — כל מה שמוסיפים כאן מתעדכן אצל כל השותפים.' : ''}</div>
+    ${!Sync.ok() ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div><b>הקטלוג לא מחובר למאגר המשותף.</b> מה שמוסיפים כאן נשאר רק בטלפון הזה. מתחברים בהגדרות ← מאגר משותף (עם קוד ההזמנה).</div></div>`
+      : (() => { const u = S.catalog.filter(x => !x.synced).length; return u ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div>⚠️ ${u} מוצרים עוד לא עלו למאגר המשותף. <button class="btn sm" id="syncNow3">🔄 להעלות עכשיו</button></div></div>` : ''; })()}
     <button class="btn full" id="sortIn" style="margin-bottom:10px;background:linear-gradient(135deg,#8a5a3c,#b0764e)">📥 זריקת תמונות למיון אוטומטי (AI)</button>
     ${nPend ? `<button class="btn sec full" id="resume" style="margin-bottom:10px">⏳ ${nPend} תמונות ממתינות למיון — המשך מיון</button>` : ''}
     <div class="chips" style="margin-bottom:12px"><span class="chip ${!cat ? 'on' : ''}" data-c="">הכול (${S.catalog.length})</span>
@@ -952,6 +954,7 @@ async function renderCatalog(app) {
   $('#newI').onclick = () => itemForm(null, cat === '__review' ? '' : cat);
   $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat);
   $('#sortIn').onclick = () => sortInbox();
+  if ($('#syncNow3')) $('#syncNow3').onclick = async () => { await Sync.run(true); render(); };
   if ($('#resume')) $('#resume').onclick = () => resumeSort();
   $('#addCat').onclick = () => catForm(null);
   if ($('#editCat')) $('#editCat').onclick = () => catForm(cat);
@@ -1220,6 +1223,12 @@ function itemForm(it, defCat) {
 const Sync = {
   busy: false,
   ok() { return !!(S.sync?.projectId && S.sync?.apiKey && S.sync?.code); },
+  tag() { return S.sync?.code ? S.sync.code.slice(-4).toUpperCase() : ''; },
+  async diag() {
+    const local = S.catalog.length, uns = S.catalog.filter(x => !x.synced).length;
+    const remote = (await this.listItems()).filter(d => !d.fields?.deleted?.booleanValue).length;
+    return { local, uns, remote };
+  },
   base() { return `https://firestore.googleapis.com/v1/projects/${S.sync.projectId}/databases/(default)/documents/ws/${S.sync.code}`; },
   async req(path, opt = {}) {
     const url = this.base() + path + (path.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(S.sync.apiKey);
@@ -1448,7 +1457,9 @@ function renderSettings(app) {
       <div style="height:10px"></div><button class="btn sec full" id="saveLists">שמירת הרשימות</button>
       <div class="muted" style="margin-top:6px">את הכללים והמידות עורכים בלשונית "כללים" ← ✏️ עריכה.</div></div>
     <div class="card"><h3>🤝 מאגר משותף</h3>
-      ${Sync.ok() ? `<div class="rule green"><span class="dot green"></span><div>מחובר למאגר משותף${S.sync.last ? ' · סנכרון אחרון ' + new Date(S.sync.last).toLocaleString('he-IL') : ''}</div></div>
+      ${Sync.ok() ? `<div class="rule green"><span class="dot green"></span><div>מחובר למאגר משותף${S.sync.last ? ' · סנכרון אחרון ' + new Date(S.sync.last).toLocaleString('he-IL') : ''}
+          <br><b>מזהה המאגר: <span dir="ltr">${esc(Sync.tag())}</span></b> <span class="muted">(צריך להיות זהה בכל הטלפונים)</span></div></div>
+        <button class="btn sec full" id="diag">🩺 בדיקת סנכרון</button><div id="diagOut" style="margin:8px 0"></div>
         <button class="btn full" id="invite">📲 שליחת הזמנה בוואטסאפ</button><div style="height:8px"></div>
         <button class="btn sec full" id="copyInv">📋 העתקת קוד ההזמנה</button><div style="height:8px"></div>
         <button class="btn sec full" id="syncNow2">🔄 סנכרון עכשיו</button><div style="height:8px"></div>
@@ -1488,6 +1499,16 @@ function renderSettings(app) {
     };
     $('#copyInv').onclick = async () => { try { await navigator.clipboard.writeText(Sync.inviteCode()); toast('הקוד הועתק'); } catch { prompt('העתיקו את הקוד:', Sync.inviteCode()); } };
     $('#syncNow2').onclick = () => Sync.run(true);
+    $('#diag').onclick = async () => {
+      const o = $('#diagOut'); o.innerHTML = '<div class="muted">בודק…</div>';
+      try {
+        const d = await Sync.diag();
+        o.innerHTML = `<div class="rule ${d.uns ? 'orange' : 'green'}"><span class="dot ${d.uns ? 'orange' : 'green'}"></span><div>
+          בטלפון הזה: <b>${d.local}</b> מוצרים · במאגר בענן: <b>${d.remote}</b> מוצרים
+          ${d.uns ? `<br>⚠️ ${d.uns} מוצרים עוד לא עלו לענן — לוחצים "סנכרון עכשיו" עם אינטרנט טוב.` : '<br>✓ כל מה שבטלפון הזה נמצא בענן.'}
+          <br><span class="muted">אם בטלפון השני רואים מספר אחר "במאגר בענן" — הוא מחובר למאגר אחר (בודקים שמזהה המאגר זהה).</span></div></div>`;
+      } catch (e) { o.innerHTML = `<div class="rule red"><span class="dot red"></span><div>לא הצלחתי להתחבר לענן: ${esc(e.message)}</div></div>`; }
+    };
     $('#leave').onclick = () => { if (confirm('להתנתק מהמאגר המשותף? המוצרים יישארו בטלפון.')) { S.sync = null; save(); render(); } };
   } else {
     $('#join').onclick = () => { if (Sync.join($('#joinCode').value)) render(); };
