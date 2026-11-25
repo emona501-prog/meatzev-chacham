@@ -2,8 +2,15 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.6.9';
+const APP_VERSION = '0.7.0';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
+// רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
+const TIERS = {
+  basic:   { label: '⚡ בסיסי',  price: 'כ-3 סנט', desc: 'לבדוק רעיון מהר וזול. פחות מדויק עם תמונות של מוצרים.', models: ['gemini-3.1-flash-lite-image', 'gemini-2.5-flash-image'] },
+  regular: { label: '⭐ רגיל',   price: 'כ-7 סנט', desc: 'לעבודה יומיומית — שומר טוב על החדר ועל המוצרים.', models: ['gemini-3.1-flash-image', 'gemini-nano-banana-2.1', 'gemini-2.5-flash-image'] },
+  pro:     { label: '💎 איכותי', price: 'כ-13 סנט', desc: 'להדמיה סופית: הכי מדויק, חושב לפני שמבצע, חד גם להדפסה.', models: ['gemini-3-pro-image', 'gemini-3.1-flash-image'] }
+};
+function tier() { return TIERS[S.settings.tier] ? S.settings.tier : 'regular'; }
 
 // ---------------- אחסון (IndexedDB) ----------------
 const DB = {
@@ -373,12 +380,20 @@ function studio(p, r, fromDesign) {
     <label>5. מה לשנות? (במילים שלך)</label>
     <textarea id="ins" placeholder="למשל: להחליף את הריצוף לאריח שבחרתי, לצבוע את הקיר מאחורי המיטה בבז' חם, להשאיר את הארון כמו שהוא">${esc('')}</textarea>
     <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="keep" checked style="width:auto"> לשנות רק מה שביקשתי, כל השאר נשאר בדיוק אותו דבר</label>
+    <label>6. רמת איכות</label>
+    <div id="tierSel" style="display:flex;gap:6px">${Object.entries(TIERS).map(([k, t]) => `<button type="button" class="btn ${k === tier() ? '' : 'sec'} sm" data-t="${k}" style="flex:1;padding:8px 4px;line-height:1.3">${t.label}<br><small style="font-weight:400">${t.price}</small></button>`).join('')}</div>
+    <div class="muted" id="tierDesc" style="margin-top:4px">${TIERS[tier()].desc}</div>
     <div style="height:14px"></div>
     <button class="btn full" id="go">✨ צור הדמיה (בתשלום)</button>
     <div style="height:8px"></div>
     <button class="btn sec full" id="goPrompt">📝 הכנת הנחיה מקצועית לג'מיני (חינם)</button>
     <div class="muted" style="margin-top:4px">המערכת מסתכלת על התמונה, בודקת מול הכללים, וכותבת הנחיה מדויקת להדבקה באפליקציית Gemini.</div>
     <div id="out"></div>`, async (b, close) => {
+    b.querySelectorAll('#tierSel [data-t]').forEach(bt => bt.onclick = () => {
+      S.settings.tier = bt.dataset.t; save();
+      b.querySelectorAll('#tierSel [data-t]').forEach(x => x.classList.toggle('sec', x !== bt));
+      $('#tierDesc', b).textContent = TIERS[bt.dataset.t].desc;
+    });
     for (const el of b.querySelectorAll('#bases .t')) {
       el.querySelector('img').src = await getImg(el.dataset.id);
       el.onclick = () => { sel.base = el.dataset.id; b.querySelectorAll('#bases .t').forEach(x => x.classList.toggle('sel', x === el)); };
@@ -519,8 +534,9 @@ function aiLogHtml() {
 }
 async function geminiText(parts, json, onStatus) {
   const key = S.settings.apiKey.trim();
-  const models = [...new Set([S.settings.textModel, ...TEXT_MODELS].filter(Boolean))];
+  const models = [...new Set([...(tier() === 'pro' ? ['gemini-3.8-flash'] : []), S.settings.textModel, ...TEXT_MODELS].filter(Boolean))];
   AI_LOG = [];
+  const skip = new Set();
   const addModel = (m) => { if (m && !models.includes(m)) models.push(m); };
   let busy = false, noFree = 0, wait = 0;
   const deadline = Date.now() + 180000;
@@ -533,6 +549,7 @@ async function geminiText(parts, json, onStatus) {
     noFree = 0;
     for (const model of models) {
       if (Date.now() > deadline) break;
+      if (skip.has(model)) continue;
       onStatus && onStatus(`שולח ל-${model}…`);
       let res;
       try {
@@ -552,7 +569,8 @@ async function geminiText(parts, json, onStatus) {
       if (res.status === 400 && /API key/i.test(msg)) throw new Error('מפתח ה-AI לא תקין.');
       if (res.status === 403) throw new Error('המפתח חסום לשירות הזה (403). צריך לבדוק ב-AI Studio שהמפתח שייך לפרויקט עם Gemini API פעיל.');
       if (res.status === 429 && /limit:\s*0\b|free_tier.*limit.*\b0\b/i.test(msg)) { noFree++; continue; } // אין בכלל מכסה חינמית במודל הזה
-      if (res.status === 503 || res.status === 500 || res.status === 429 || /high demand|overloaded|unavailable/i.test(msg)) { busy = true; continue; }
+      if (res.status === 429) { skip.add(model); busy = true; continue; } // מכסה — לא מנסים שוב את אותו מודל בסבב הזה
+      if (res.status === 503 || res.status === 500 || /high demand|overloaded|unavailable/i.test(msg)) { busy = true; continue; }
       if (!res.ok) throw new Error('שגיאה מהשרת: ' + (msg || res.status));
       const out = (j?.candidates?.[0]?.content?.parts || []).map(x => x.text || '').join('');
       if (!out) { AI_LOG[AI_LOG.length - 1].msg = 'empty: ' + (j?.candidates?.[0]?.finishReason || j?.promptFeedback?.blockReason || ''); continue; }
@@ -682,30 +700,32 @@ function buildPrompt(r, sel, ins, items) {
 }
 
 async function aiEdit(baseDataURL, refs, prompt) {
-  const key = S.settings.apiKey.trim(), model = (S.settings.model || DEFAULT_MODEL).trim();
+  const key = S.settings.apiKey.trim();
+  const custom = (S.settings.model || '').trim();
+  const models = [...TIERS[tier()].models]; if (custom && custom !== DEFAULT_MODEL && !models.includes(custom)) models.unshift(custom);
   const part = (d) => { const [h, b64] = d.split(','); return { inline_data: { mime_type: h.match(/data:(.*?);/)?.[1] || 'image/jpeg', data: b64 } }; };
   const parts = [{ text: prompt }, part(baseDataURL)];
   refs.forEach((r, i) => { if (r.img) { parts.push({ text: `Reference product ${i + 1}: ${r.item.name}` }); parts.push(part(r.img)); } });
-  let res;
-  try {
-    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } })
-    });
-  } catch { throw new Error('אין חיבור לאינטרנט, או שהשרת לא זמין. נסו שוב.'); }
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const m = j?.error?.message || '';
-    if (res.status === 400 && /API key/i.test(m)) throw new Error('מפתח ה-AI לא תקין. בודקים אותו בהגדרות.');
-    if (res.status === 403) throw new Error('למפתח אין הרשאה למודל הזה. בודקים בהגדרות או ב-Google AI Studio.');
-    if (res.status === 429) throw new Error('המכסה נגמרה או שצריך להפעיל חיוב בחשבון גוגל. מודלי תמונה דורשים חיוב.');
-    if (res.status === 404) {
-      const sm = suggestedModel(m);
-      if (sm && sm !== model && !aiEdit._retry) { S.settings.model = sm; save(); aiEdit._retry = true; try { return await aiEdit(baseDataURL, refs, prompt); } finally { aiEdit._retry = false; } }
-      throw new Error(`המודל "${model}" לא נמצא. בודקים את שם המודל בהגדרות.`);
+  const body = JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } });
+  let res, j, lastErr = '';
+  for (let round = 0; round < 2; round++) {
+    for (let mi = 0; mi < models.length; mi++) {
+      const model = models[mi];
+      try { res = await fetchT(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body }, 120000); }
+      catch (e) { lastErr = e.timeout ? 'השרת לא ענה בזמן.' : 'אין חיבור לאינטרנט.'; continue; }
+      j = await res.json().catch(() => ({}));
+      if (res.ok) { round = 9; break; }
+      const m = j?.error?.message || '';
+      if (res.status === 400 && /API key/i.test(m)) throw new Error('מפתח ה-AI לא תקין. בודקים אותו בהגדרות.');
+      if (res.status === 404) { const sm = suggestedModel(m); if (sm && !models.includes(sm)) models.push(sm); lastErr = `המודל ${model} לא נמצא.`; continue; }
+      if (res.status === 429 && /limit:\s*0\b|billing|free/i.test(m)) throw new Error('הדמיות דורשות חיוב פעיל בחשבון גוגל (המודלים האלה לא זמינים בחינם).');
+      if (res.status === 403) { lastErr = 'למפתח אין הרשאה למודל הזה.'; continue; }
+      if (res.status === 429 || res.status >= 500) { lastErr = 'השרתים עמוסים כרגע.'; continue; }
+      throw new Error('שגיאה מהשרת: ' + (m || res.status));
     }
-    throw new Error('שגיאה מהשרת: ' + (m || res.status));
+    if (round === 0 && !(res && res.ok)) await new Promise(r => setTimeout(r, 5000));
   }
+  if (!res || !res.ok) throw new Error(lastErr + ' נסו שוב בעוד כמה דקות, או בחרו רמת איכות אחרת.');
   const ps = j?.candidates?.[0]?.content?.parts || [];
   const img = ps.find(x => x.inlineData || x.inline_data);
   if (!img) {
@@ -1137,8 +1157,8 @@ function renderSettings(app) {
       <div class="muted" style="margin-top:6px">המפתח נשמר רק בטלפון הזה. מקבלים אותו ב-aistudio.google.com ← Get API key. להדמיות צריך להפעיל חיוב בחשבון גוגל (מומלץ עם תקרת הוצאה).</div>
       ${Sync.ok() ? `<label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="shareAI" style="width:auto" ${st.shareAI !== false ? 'checked' : ''}> לשתף את המפתח עם כל המחוברים למאגר המשותף</label>
         <div class="muted">כשמסומן, המפתח מגיע לבד לטלפונים של השותפים, וכל ההדמיות שלהם מחויבות באותו חשבון.</div>` : ''}
-      <label>שם המודל</label><input id="model" value="${esc(st.model || DEFAULT_MODEL)}" dir="ltr">
-      <div class="muted" style="margin-top:6px">ברירת מחדל: ${DEFAULT_MODEL}. אפשר להחליף למודל חדש יותר.</div>
+      <label>מודל מותאם אישית (לא חובה)</label><input id="model" value="${esc(st.model && st.model !== DEFAULT_MODEL ? st.model : '')}" dir="ltr" placeholder="ריק = לפי רמת האיכות שנבחרה">
+      <div class="muted" style="margin-top:6px">את המודל בוחרים בסטודיו לפי רמה: ⚡ בסיסי / ⭐ רגיל / 💎 איכותי. כאן ממלאים רק אם רוצים לכפות מודל מסוים.</div>
       <div style="height:10px"></div><button class="btn sec full" id="test">בדיקת חיבור</button></div>
     <div class="card"><h3>🎬 פתיח</h3>
       <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="inLogo" style="width:auto" ${st.introLogo !== false ? 'checked' : ''}> סרטון הלוגו בפתיחת האפליקציה</label>
