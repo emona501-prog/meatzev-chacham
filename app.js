@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.7.9';
+const APP_VERSION = '0.8.0';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -134,6 +134,8 @@ const proj = () => S.projects.find(p => p.id === V.projectId);
 const room = () => proj()?.rooms.find(r => r.id === V.roomId);
 
 function go(patch) { Object.assign(V, patch); render(); window.scrollTo(0, 0); }
+// מעבר בתוך אותו מסך (למשל בחירת קטגוריה) — בלי לקפוץ למעלה
+async function stay(patch) { const y = window.scrollY; Object.assign(V, patch); await render(); window.scrollTo(0, y); requestAnimationFrame(() => window.scrollTo(0, y)); }
 
 $('#tabs').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -981,8 +983,8 @@ async function renderCatalog(app) {
     ${cat ? '' : '<div class="muted" style="margin-bottom:10px">טיפ: בוחרים קודם קטגוריה, ואז כל התמונות שמוסיפים נכנסות אליה.</div>'}
     <div class="swatches" id="clist"></div>
     ${list.length ? '' : '<div class="empty"><b>🧱</b>אין מוצרים בקטגוריה הזו עדיין.</div>'}`;
-  app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => go({ catFilter: c.dataset.c, subFilter: '' }));
-  app.querySelectorAll('[data-s]').forEach(c => c.onclick = () => go({ subFilter: c.dataset.s }));
+  app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => stay({ catFilter: c.dataset.c, subFilter: '' }));
+  app.querySelectorAll('[data-s]').forEach(c => c.onclick = () => stay({ subFilter: c.dataset.s }));
   if ($('#addSub')) $('#addSub').onclick = () => catForm(cat, true);
   $('#newI').onclick = () => itemForm(null, cat === '__review' ? '' : cat, sub);
   $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat, sub);
