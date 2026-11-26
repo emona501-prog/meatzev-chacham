@@ -616,18 +616,63 @@ async function pdfToImage(file) {
 }
 
 // ---------------- תלת־ממד ----------------
+// חומרים: ריצוף (מרקם מצויר או תמונה מהקטלוג) וצבע קירות — נשמרים בתוכנית
+const FLOORS = {
+  oak: { name: 'פרקט אלון', c: ['#c9a27a', '#b98f66', '#d4b08a'], kind: 'planks' },
+  walnut: { name: 'פרקט אגוז', c: ['#7a5638', '#6a4a30', '#86603f'], kind: 'planks' },
+  herring: { name: 'פרקט שברון', c: ['#c7a07a', '#b48c64', '#d2ae88'], kind: 'herring' },
+  tileL: { name: 'אריח בהיר 60×60', c: ['#ece7e0', '#e4ded6'], kind: 'tile', size: 60 },
+  tileG: { name: 'אריח אפור 80×80', c: ['#a7a39e', '#9d9993'], kind: 'tile', size: 80 },
+  tileD: { name: 'אריח כהה 120×60', c: ['#4f4b47', '#45423e'], kind: 'tile', size: 120, h: 60 },
+  marble: { name: 'שיש לבן', c: ['#f1efec', '#d8d3cd'], kind: 'marble' },
+  concrete: { name: 'בטון מוחלק', c: ['#b9b5af', '#aca8a2'], kind: 'concrete' }
+};
+const PAINTS = [['#efeae3', 'לבן שבור'], ['#ffffff', 'לבן'], ['#e8dccb', 'שמנת'], ['#d9cbb6', 'בז׳'], ['#c9c3b8', 'אפור חם'], ['#a9b3ad', 'מרווה'], ['#9fb2c4', 'כחול אפרפר'], ['#d8b4a0', 'אפרסק'], ['#7d8c7a', 'זית'], ['#55606b', 'אפור כהה']];
+function floorCanvas(key) {
+  const f = FLOORS[key] || FLOORS.oak, c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d');
+  const rnd = (i) => { const s = Math.sin(i * 12.9898) * 43758.5453; return s - Math.floor(s); };
+  x.fillStyle = f.c[0]; x.fillRect(0, 0, 512, 512);
+  if (f.kind === 'planks') { // קרשים 20×120 ס"מ (512px = 2 מ')
+    const pw = 51, pl = 307; let i = 0;
+    for (let col = 0; col < 11; col++) for (let off = -((col * 131) % pl); off < 512; off += pl) {
+      x.fillStyle = f.c[(i++) % f.c.length]; x.fillRect(col * pw, off, pw - 1.5, pl - 1.5);
+      x.globalAlpha = .08; for (let g = 0; g < 6; g++) { x.fillStyle = rnd(i * 7 + g) > .5 ? '#000' : '#fff'; x.fillRect(col * pw + rnd(i + g) * pw, off, 1.5, pl); } x.globalAlpha = 1;
+    }
+  } else if (f.kind === 'herring') { // שברון: עמודות של קרשים באלכסון, כל עמודה בכיוון הפוך
+    const cw = 64, step = 32; let i = 0;
+    for (let col = 0; col < 512 / cw; col++) {
+      const x0 = col * cw, dir = col % 2 ? 1 : -1;
+      for (let y = -cw; y < 512 + cw; y += step) {
+        x.fillStyle = f.c[(i++ * 7 + col) % 3]; x.beginPath();
+        const yl = y + (dir > 0 ? 0 : cw), yr = y + (dir > 0 ? cw : 0);
+        x.moveTo(x0 + 0.8, yl + 0.8); x.lineTo(x0 + cw - 0.8, yr + 0.8); x.lineTo(x0 + cw - 0.8, yr + step - 0.8); x.lineTo(x0 + 0.8, yl + step - 0.8); x.closePath(); x.fill();
+      }
+    }
+  } else if (f.kind === 'tile') {
+    const tw = 512 * f.size / 200, th = 512 * (f.h || f.size) / 200; let i = 0;
+    for (let yy = 0; yy < 512; yy += th) for (let xx = 0; xx < 512; xx += tw) { x.fillStyle = f.c[(i++) % f.c.length]; x.fillRect(xx + 1, yy + 1, tw - 2, th - 2); }
+  } else if (f.kind === 'marble') {
+    x.strokeStyle = f.c[1]; for (let i = 0; i < 14; i++) { x.lineWidth = .5 + rnd(i) * 2; x.globalAlpha = .5; x.beginPath(); let px = rnd(i * 3) * 512, py = 0; x.moveTo(px, py); while (py < 512) { px += (rnd(px + py) - .5) * 40; py += 20; x.lineTo(px, py); } x.stroke(); }
+    x.globalAlpha = 1; x.strokeStyle = '#e6e1db'; x.lineWidth = 1; for (let k = 0; k <= 512; k += 256) { x.strokeRect(0, k, 512, 0); x.strokeRect(k, 0, 0, 512); }
+  } else { for (let i = 0; i < 4000; i++) { x.fillStyle = rnd(i) > .5 ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.06)'; x.fillRect(rnd(i * 2) * 512, rnd(i * 3) * 512, 3, 3); } }
+  return c;
+}
 async function open3D(plan) {
   if (!plan.walls.length) return toast('קודם משרטטים קירות');
+  plan.mat = plan.mat || { floor: 'oak', wall: '#efeae3' };
   const m = document.createElement('div'); m.className = 'modal'; m.style.alignItems = 'stretch';
-  m.innerHTML = `<div style="position:relative;width:100%;height:100%;background:#e9e4dc">
+  m.innerHTML = `<div style="position:relative;width:100%;height:100%;background:#e9e4dc;touch-action:none">
     <div id="c3" style="position:absolute;inset:0"></div>
-    <div style="position:absolute;top:calc(10px + var(--safe-t));right:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap">
+    <div style="position:absolute;top:calc(10px + var(--safe-t));right:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap;z-index:2">
       <button class="btn sm" id="x3">✕ סגירה</button>
-      <button class="btn sec sm" id="mOrbit">🔄 סיבוב</button><button class="btn sec sm" id="mWalk">🚶 הליכה</button>
+      <button class="btn sec sm" id="mOrbit">🔄 מבט על</button><button class="btn sec sm" id="mWalk">🚶 הליכה</button>
+      <button class="btn sec sm" id="mMat">🎨 חומרים</button><button class="btn sec sm" id="mTour">🎬 סרטון סיור</button><button class="btn sec sm" id="mRec">⏺️ הקלטה</button>
       ${plan.original ? '<button class="btn sec sm" id="mBA">לפני / אחרי</button>' : ''}</div>
-    <div id="walkPad" style="position:absolute;bottom:calc(20px + var(--safe-b));left:50%;transform:translateX(-50%);display:none;gap:8px">
-      <button class="btn sec" data-mv="l">↪️</button><button class="btn sec" data-mv="f">⬆️</button><button class="btn sec" data-mv="b">⬇️</button><button class="btn sec" data-mv="r">↩️</button></div>
-    <div id="ba3" class="lbl" style="position:absolute;bottom:calc(20px + var(--safe-b));right:10px;background:rgba(0,0,0,.6);color:#fff;padding:4px 10px;border-radius:8px;font-size:13px;display:none"></div>
+    <div id="joy" style="position:absolute;bottom:calc(24px + var(--safe-b));left:24px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.35);border:2px solid rgba(255,255,255,.8);display:none;z-index:2;touch-action:none">
+      <div id="joyK" style="position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(80,60,40,.75)"></div></div>
+    <div id="hint3" style="position:absolute;bottom:calc(28px + var(--safe-b));right:12px;max-width:52%;background:rgba(0,0,0,.55);color:#fff;padding:6px 10px;border-radius:10px;font-size:12px;display:none;z-index:2">עיגול שמאלי = ללכת · גרירה על המסך = להסתכל מסביב</div>
+    <div id="recDot" style="position:absolute;top:calc(60px + var(--safe-t));left:12px;background:#c62828;color:#fff;padding:4px 10px;border-radius:12px;font-size:13px;display:none;z-index:2">● מקליט</div>
+    <div id="ba3" class="lbl" style="position:absolute;top:calc(60px + var(--safe-t));right:10px;background:rgba(0,0,0,.6);color:#fff;padding:4px 10px;border-radius:8px;font-size:13px;display:none;z-index:2"></div>
     <div id="load3" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><div class="spinner"></div></div></div>`;
   document.body.appendChild(m);
   let THREE, OrbitControls;
@@ -635,30 +680,58 @@ async function open3D(plan) {
   catch (e) { m.remove(); return toast('לא הצלחתי לטעון את מנוע התלת־ממד'); }
   $('#load3', m).remove();
   const box = $('#c3', m);
-  const renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setSize(box.clientWidth, box.clientHeight); box.appendChild(renderer.domElement);
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0xe9e4dc);
   const camera = new THREE.PerspectiveCamera(60, box.clientWidth / box.clientHeight, 0.05, 500);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xb8ad9f, 1.1));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(8, 15, 6); scene.add(sun);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xb8ad9f, 1.0));
+  const amb = new THREE.AmbientLight(0xffffff, 0.25); scene.add(amb);
+  const lamp = new THREE.PointLight(0xfff1dc, 0, 12, 1); scene.add(lamp); // "מנורה" שהולכת עם המבקר — בפנים יש תקרה שחוסמת את השמש
+  const sun = new THREE.DirectionalLight(0xfff4e6, 1.3); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); scene.add(sun); scene.add(sun.target);
   const group = new THREE.Group(); scene.add(group);
-  let showing = plan;
+  let showing = plan, ceiling = null, walking = false;
   const H = (plan.height || 280) / 100;
-  let build = function (pl) {
+  let walls2 = []; // לבדיקת התנגשות בהליכה
+  const texCache = {};
+  async function floorMaterial() {
+    const k = plan.mat.floor; let tex;
+    if (k?.startsWith?.('cat:')) {
+      const it = (typeof S !== 'undefined' ? S.catalog : []).find(x => x.id === k.slice(4));
+      const src = it ? (await getImg(it.img)) || it.th : null;
+      if (src) { const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = src; }); if (img) { tex = new THREE.Texture(img); tex.needsUpdate = true; tex.repeat.set(1, 1); tex.userData = { meters: 0.8 }; } }
+    }
+    if (!tex) { tex = texCache[k] || (texCache[k] = new THREE.CanvasTexture(floorCanvas(FLOORS[k] ? k : 'oak'))); tex.userData = { meters: 2 }; }
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return new THREE.MeshStandardMaterial({ map: tex, roughness: k === 'marble' ? 0.35 : 0.75 });
+  }
+  let build = async function (pl) {
     while (group.children.length) { const c = group.children.pop(); c.geometry?.dispose(); }
+    walls2 = [];
     const xs = pl.walls.flatMap(w => [w.x1, w.x2]), ys = pl.walls.flatMap(w => [w.y1, w.y2]);
     const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry((maxx - minx) / 100 + 1, (maxy - miny) / 100 + 1), new THREE.MeshStandardMaterial({ color: 0xcdb79e, roughness: 0.9 }));
+    const FW = (maxx - minx) / 100 + 1, FD = (maxy - miny) / 100 + 1;
+    const fm = await floorMaterial(); const tm = fm.map.userData.meters; fm.map.repeat.set(FW / tm, FD / tm);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(FW, FD), fm); floor.receiveShadow = true;
     floor.rotation.x = -Math.PI / 2; floor.position.set((minx + maxx) / 200, 0, (miny + maxy) / 200); group.add(floor);
-    const glass = new THREE.MeshStandardMaterial({ color: 0x9ec9e8, transparent: true, opacity: 0.35, roughness: 0.1 });
+    ceiling = new THREE.Mesh(new THREE.PlaneGeometry(FW, FD), new THREE.MeshStandardMaterial({ color: 0xfbfaf8, roughness: 1, side: THREE.DoubleSide }));
+    ceiling.rotation.x = Math.PI / 2; ceiling.position.set((minx + maxx) / 200, H, (miny + maxy) / 200); ceiling.visible = walking; group.add(ceiling);
+    sun.position.set((minx + maxx) / 200 + 6, 12, (miny + maxy) / 200 + 4); sun.target.position.set((minx + maxx) / 200, 0, (miny + maxy) / 200);
+    const ext = Math.max(FW, FD); Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, far: 60 }); sun.shadow.camera.updateProjectionMatrix();
+    const glass = new THREE.MeshStandardMaterial({ color: 0x9ec9e8, transparent: true, opacity: 0.3, roughness: 0.05 });
+    const frameM = new THREE.MeshStandardMaterial({ color: 0x5b4a3c, roughness: 0.6 });
     for (const w of pl.walls) {
       const L = len(w) / 100, ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1), T = w.thick / 100;
-      const mat = new THREE.MeshStandardMaterial({ color: (WALL_TYPES[w.type] || WALL_TYPES.interior).c3, roughness: 0.85 });
+      const custom = w.type === 'interior' || w.type === 'exterior' || w.type === 'unknown' || !w.type;
+      const mat = new THREE.MeshStandardMaterial({ color: custom ? new THREE.Color(plan.mat.wall) : (WALL_TYPES[w.type] || WALL_TYPES.interior).c3, roughness: 0.9 });
       const ops = pl.openings.filter(o => o.wallId === w.id).map(o => ({ a: (o.pos - o.width / 2) / 100, b: (o.pos + o.width / 2) / 100, bot: (o.kind === 'door' ? 0 : o.sill) / 100, top: ((o.kind === 'door' ? 0 : o.sill) + o.height) / 100, kind: o.kind })).sort((p, q) => p.a - q.a);
+      walls2.push({ x1: w.x1 / 100, z1: w.y1 / 100, x2: w.x2 / 100, z2: w.y2 / 100, T, L, doors: ops.filter(o => o.kind === 'door') });
       const piece = (s0, s1, y0, y1, material = mat, thick = T) => {
         if (s1 - s0 < 0.005 || y1 - y0 < 0.005) return;
         const g = new THREE.BoxGeometry(s1 - s0, y1 - y0, thick); const mesh = new THREE.Mesh(g, material);
-        const mid = (s0 + s1) / 2;
+        const mid = (s0 + s1) / 2; mesh.castShadow = material !== glass; mesh.receiveShadow = true;
         mesh.position.set(w.x1 / 100 + Math.cos(ang) * mid, (y0 + y1) / 2, w.y1 / 100 + Math.sin(ang) * mid);
         mesh.rotation.y = -ang; group.add(mesh);
       };
@@ -668,60 +741,152 @@ async function open3D(plan) {
         piece(o.a, o.b, Math.min(o.top, H), H);
         if (o.bot > 0) piece(o.a, o.b, 0, o.bot);
         if (o.kind === 'window') piece(o.a, o.b, o.bot, Math.min(o.top, H), glass, 0.02);
+        // משקוף דק סביב הפתח
+        const fT = T + 0.02, fw = 0.05;
+        piece(o.a - fw, o.a, o.bot, Math.min(o.top, H), frameM, fT); piece(o.b, o.b + fw, o.bot, Math.min(o.top, H), frameM, fT);
+        if (o.top < H) piece(o.a - fw, o.b + fw, o.top, Math.min(o.top + fw, H), frameM, fT);
         s = Math.max(s, o.b);
       }
       piece(s, L, 0, H);
     }
-    return { cx: (minx + maxx) / 200, cz: (miny + maxy) / 200, size: Math.max(maxx - minx, maxy - miny) / 100 };
+    return { cx: (minx + maxx) / 200, cz: (miny + maxy) / 200, size: Math.max(maxx - minx, maxy - miny) / 100, minx: minx / 100, maxx: maxx / 100, minz: miny / 100, maxz: maxy / 100 };
   }
   function addFurniture(pl) {
     for (const f of (pl.furniture || [])) {
       const d = FURN[f.type]; if (!d) continue;
       const mat = new THREE.MeshStandardMaterial({ color: d.c3, roughness: 0.8 });
       const geo = d.round ? new THREE.CylinderGeometry(f.w / 200, f.w / 200, d.h / 100, 32) : new THREE.BoxGeometry(f.w / 100, d.h / 100, f.d / 100);
-      const mesh = new THREE.Mesh(geo, mat); mesh.position.set(f.x / 100, d.h / 200, f.y / 100); mesh.rotation.y = -(f.rot || 0) * Math.PI / 180; group.add(mesh);
+      const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = mesh.receiveShadow = true; mesh.position.set(f.x / 100, d.h / 200, f.y / 100); mesh.rotation.y = -(f.rot || 0) * Math.PI / 180; group.add(mesh);
       if (d.chairs) { const cm = new THREE.MeshStandardMaterial({ color: 0x6f5a48, roughness: 0.8 });
         const pts = d.chairs === 6 ? [-1, 0, 1].flatMap(i => [[i * f.w / 3, -f.d / 2 - 15], [i * f.w / 3, f.d / 2 + 15]]) : [[0, -f.d / 2 - 15], [0, f.d / 2 + 15], [-f.w / 2 - 15, 0], [f.w / 2 + 15, 0]];
         const a = (f.rot || 0) * Math.PI / 180;
-        for (const [lx, ly] of pts) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), cm); c.position.set((f.x + lx * Math.cos(a) - ly * Math.sin(a)) / 100, 0.225, (f.y + lx * Math.sin(a) + ly * Math.cos(a)) / 100); group.add(c); }
+        for (const [lx, ly] of pts) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), cm); c.castShadow = true; c.position.set((f.x + lx * Math.cos(a) - ly * Math.sin(a)) / 100, 0.225, (f.y + lx * Math.sin(a) + ly * Math.cos(a)) / 100); group.add(c); }
       }
     }
   }
-  const build0 = build; build = (pl) => { const r = build0(pl); addFurniture(pl); return r; };
-  let info = build(plan);
+  const build0 = build; build = async (pl) => { const r = await build0(pl); addFurniture(pl); return r; };
+  let info = await build(plan);
   const controls = new OrbitControls(camera, renderer.domElement);
+  // ---- הליכה: ג'ויסטיק + גרירה להסתכלות + התנגשות בקירות (עוברים רק דרך דלתות) ----
+  let yaw = 0, pitch = 0; const joy = { x: 0, y: 0 };
+  const applyLook = () => { camera.rotation.order = 'YXZ'; camera.rotation.set(pitch, yaw, 0); };
+  function blocked(px, pz) {
+    const R = 0.22;
+    for (const w of walls2) {
+      const dx = w.x2 - w.x1, dz = w.z2 - w.z1, L2 = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((px - w.x1) * dx + (pz - w.z1) * dz) / L2));
+      const qx = w.x1 + dx * t, qz = w.z1 + dz * t, dist = Math.hypot(px - qx, pz - qz);
+      if (dist < w.T / 2 + R) { const along = t * w.L; if (!w.doors.some(o => along > o.a + 0.08 && along < o.b - 0.08)) return true; }
+    }
+    return false;
+  }
+  function stepWalk(dt) {
+    if (!walking || (!joy.x && !joy.y)) return;
+    const sp = 1.4 * dt, fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    const mx = (fx * -joy.y + rx * joy.x) * sp, mz = (fz * -joy.y + rz * joy.x) * sp;
+    const p = camera.position;
+    if (!blocked(p.x + mx, p.z + mz)) { p.x += mx; p.z += mz; }
+    else if (!blocked(p.x + mx, p.z)) p.x += mx;
+    else if (!blocked(p.x, p.z + mz)) p.z += mz;
+  }
+  // גרירה על המסך = סיבוב הראש
+  let look = null;
+  renderer.domElement.addEventListener('pointerdown', e => { if (walking) { look = { id: e.pointerId, x: e.clientX, y: e.clientY }; } });
+  renderer.domElement.addEventListener('pointermove', e => { if (!look || e.pointerId !== look.id) return; yaw += (e.clientX - look.x) * 0.005; pitch = Math.max(-1.2, Math.min(1.2, pitch + (e.clientY - look.y) * 0.004)); look.x = e.clientX; look.y = e.clientY; applyLook(); });
+  const endLook = e => { if (look && e.pointerId === look.id) look = null; };
+  renderer.domElement.addEventListener('pointerup', endLook); renderer.domElement.addEventListener('pointercancel', endLook);
+  const J = $('#joy', m), K = $('#joyK', m);
+  J.addEventListener('pointerdown', e => { e.stopPropagation(); J.setPointerCapture(e.pointerId); moveJ(e); });
+  J.addEventListener('pointermove', e => { if (e.buttons || e.pointerType === 'touch') moveJ(e); });
+  const endJ = () => { joy.x = joy.y = 0; K.style.left = K.style.top = '35px'; };
+  J.addEventListener('pointerup', endJ); J.addEventListener('pointercancel', endJ);
+  function moveJ(e) { const r = J.getBoundingClientRect(); let dx = (e.clientX - r.left - 60) / 45, dy = (e.clientY - r.top - 60) / 45; const l = Math.hypot(dx, dy); if (l > 1) { dx /= l; dy /= l; } joy.x = dx; joy.y = dy; K.style.left = (35 + dx * 45) + 'px'; K.style.top = (35 + dy * 45) + 'px'; }
+  // בטלפון לאורך המסך צר — מרחיבים את זווית הצילום כדי לראות את החדר ולא רק קיר
+  const walkFov = () => Math.min(90, Math.max(70, 2 * Math.atan(Math.tan(38 * Math.PI / 180) / camera.aspect) * 180 / Math.PI));
+  function clearance(x, z) { let d = 1e9; for (const w of walls2) { const dx = w.x2 - w.x1, dz = w.z2 - w.z1, L2 = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - w.x1) * dx + (z - w.z1) * dz) / L2)); d = Math.min(d, Math.hypot(x - w.x1 - dx * t, z - w.z1 - dz * t) - w.T / 2); } return d; }
+  function startPoint() { // הנקודה הכי מרווחת בדירה, ופונים לכיוון הכי פתוח
+    let best = [info.cx, info.cz], bc = -1;
+    for (let x = info.minx + 0.3; x < info.maxx; x += 0.2) for (let z = info.minz + 0.3; z < info.maxz; z += 0.2) { const c = clearance(x, z); if (c > bc) { bc = c; best = [x, z]; } }
+    let by = 0, bl = -1;
+    for (let a = 0; a < 6.28; a += 0.2) { let l = 0; while (l < 15 && !blocked(best[0] - Math.sin(a) * l, best[1] - Math.cos(a) * l)) l += 0.1; if (l > bl) { bl = l; by = a; } }
+    return [best[0], best[1], by];
+  }
   function orbit() {
-    $('#walkPad', m).style.display = 'none';
+    walking = false; if (ceiling) ceiling.visible = false; controls.enabled = true; amb.intensity = 0.25; lamp.intensity = 0; camera.fov = 60; camera.updateProjectionMatrix();
+    J.style.display = 'none'; $('#hint3', m).style.display = 'none';
     controls.minDistance = 0.5; controls.maxDistance = 200; controls.enablePan = true; controls.maxPolarAngle = Math.PI / 2.05;
     camera.position.set(info.cx + info.size * 0.6, info.size * 0.9 + 3, info.cz + info.size * 0.9);
     controls.target.set(info.cx, 0, info.cz); controls.update();
   }
   function walk() {
-    $('#walkPad', m).style.display = 'flex';
-    camera.position.set(info.cx, 1.6, info.cz); controls.target.set(info.cx, 1.6, info.cz - 0.1);
-    controls.minDistance = 0.1; controls.maxDistance = 0.1; controls.enablePan = false; controls.maxPolarAngle = Math.PI; controls.update();
+    walking = true; if (ceiling) ceiling.visible = true; controls.enabled = false;
+    J.style.display = 'block'; $('#hint3', m).style.display = 'block'; setTimeout(() => { const h = $('#hint3', m); if (h) h.style.display = 'none'; }, 5000);
+    amb.intensity = 0.45; lamp.intensity = 1.2; camera.fov = walkFov(); camera.updateProjectionMatrix();
+    const [x, z, y] = startPoint(); camera.position.set(x, 1.6, z); yaw = y; pitch = 0; applyLook();
   }
   orbit();
   $('#mOrbit', m).onclick = orbit; $('#mWalk', m).onclick = walk;
-  m.querySelectorAll('[data-mv]').forEach(b => {
-    let t = null; const act = () => {
-      const dir = new THREE.Vector3().subVectors(controls.target, camera.position); dir.y = 0; dir.normalize();
-      const mv = b.dataset.mv;
-      if (mv === 'f' || mv === 'b') { const st = dir.multiplyScalar(mv === 'f' ? 0.12 : -0.12); camera.position.add(st); controls.target.add(st); }
-      else { const a = mv === 'l' ? 0.06 : -0.06; const off = new THREE.Vector3().subVectors(controls.target, camera.position).applyAxisAngle(new THREE.Vector3(0, 1, 0), a); controls.target.copy(camera.position).add(off); }
-      controls.update();
-    };
-    b.onpointerdown = () => { act(); t = setInterval(act, 60); }; b.onpointerup = b.onpointerleave = () => clearInterval(t);
-  });
-  if ($('#mBA', m)) $('#mBA', m).onclick = () => {
-    showing = showing === plan ? plan.original : plan; info = build(showing);
+  if ($('#mBA', m)) $('#mBA', m).onclick = async () => {
+    showing = showing === plan ? plan.original : plan; info = await build(showing);
     const l = $('#ba3', m); l.style.display = ''; l.textContent = showing === plan ? 'אחרי (תכנון)' : 'לפני (מצב קיים)';
   };
-  let alive = true;
-  const loop = () => { if (!alive) return; renderer.render(scene, camera); requestAnimationFrame(loop); }; loop();
-  const onResize = () => { camera.aspect = box.clientWidth / box.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(box.clientWidth, box.clientHeight); };
+  // ---- חומרים ----
+  $('#mMat', m).onclick = () => {
+    const cat = (typeof S !== 'undefined' ? S.catalog : []).filter(x => !x.deleted && ['ריצוף', 'חיפוי קירות', 'משטחים'].includes(x.cat));
+    modal('🎨 חומרים בתלת־ממד', `<label>ריצוף</label><div class="chips">${Object.entries(FLOORS).map(([k, f]) => `<button class="chip${plan.mat.floor === k ? ' on' : ''}" data-f="${k}">${f.name}</button>`).join('')}</div>
+      ${cat.length ? `<label>או ריצוף מהקטלוג</label><div class="thumbs">${cat.map(it => `<div class="thumb" data-cf="${it.id}" style="${plan.mat.floor === 'cat:' + it.id ? 'outline:3px solid var(--accent)' : ''}"><img src="${it.th || ''}"><div class="cap">${esc(it.name)}</div></div>`).join('')}</div>` : '<div class="muted" style="margin-top:6px">כשיהיו בקטלוג מוצרי ריצוף — אפשר יהיה לבחור אותם כאן ולראות אותם על הרצפה.</div>'}
+      <label>צבע קירות</label><div class="chips">${PAINTS.map(([c, n]) => `<button class="chip${plan.mat.wall === c ? ' on' : ''}" data-w="${c}"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${c};border:1px solid #0003;vertical-align:-2px"></span> ${n}</button>`).join('')}</div>
+      <div class="row" style="margin-top:8px"><label style="margin:0">צבע אחר:</label><input type="color" id="wc" value="${plan.mat.wall}"></div>
+      <div class="muted" style="margin-top:8px">קירות נושאים וממ"ד נשארים בצבע הסימון שלהם, כדי שיהיה ברור מה אסור להזיז.</div>`, (b, close) => {
+      const apply = async () => { changed(); info = await build(showing); };
+      b.querySelectorAll('[data-f]').forEach(x => x.onclick = async () => { plan.mat.floor = x.dataset.f; b.querySelectorAll('[data-f]').forEach(y => y.classList.toggle('on', y === x)); await apply(); });
+      b.querySelectorAll('[data-cf]').forEach(x => x.onclick = async () => { plan.mat.floor = 'cat:' + x.dataset.cf; await apply(); close(); toast('הריצוף הוחלף'); });
+      b.querySelectorAll('[data-w]').forEach(x => x.onclick = async () => { plan.mat.wall = x.dataset.w; b.querySelectorAll('[data-w]').forEach(y => y.classList.toggle('on', y === x)); await apply(); });
+      b.querySelector('#wc').onchange = async e => { plan.mat.wall = e.target.value; await apply(); };
+    });
+  };
+  // ---- הקלטת וידאו של מה שעל המסך (חינם, בלי AI) ----
+  let rec = null;
+  function recMime() { for (const t of ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm']) if (window.MediaRecorder?.isTypeSupported?.(t)) return t; return ''; }
+  function startRec() {
+    if (!window.MediaRecorder || !renderer.domElement.captureStream) { toast('הדפדפן הזה לא תומך בהקלטת וידאו'); return false; }
+    const mime = recMime(), chunks = [];
+    rec = new MediaRecorder(renderer.domElement.captureStream(30), mime ? { mimeType: mime, videoBitsPerSecond: 6e6 } : undefined);
+    rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+    rec.onstop = () => {
+      const type = (rec.mimeType || mime || 'video/webm').split(';')[0], blob = new Blob(chunks, { type }); rec = null;
+      $('#recDot', m).style.display = 'none'; $('#mRec', m).textContent = '⏺️ הקלטה';
+      const ext = type.includes('mp4') ? 'mp4' : 'webm';
+      modal('🎥 סרטון הסיור', '', b => videoPlayer(b, blob, `סיור-תלת-ממד.${ext}`));
+    };
+    rec.start(500); $('#recDot', m).style.display = 'block'; $('#mRec', m).textContent = '⏹️ עצירה';
+    return true;
+  }
+  $('#mRec', m).onclick = () => { if (rec) rec.stop(); else if (startRec()) toast('מקליט — מסתובבים בבית ולוחצים "עצירה"'); };
+  // ---- סיור אוטומטי מוקלט: מבט 360° מבפנים ואז "רחפן" מעל הדירה ----
+  let tour = null;
+  $('#mTour', m).onclick = () => {
+    if (tour || rec) return;
+    walk(); $('#hint3', m).style.display = 'none'; J.style.display = 'none';
+    if (!startRec()) return;
+    const [x0, z0] = [camera.position.x, camera.position.z], t0 = performance.now(), y0 = yaw;
+    tour = (now) => {
+      const t = (now - t0) / 1000;
+      if (t < 9) { yaw = y0 + (t / 9) * Math.PI * 2; pitch = -0.05; camera.position.set(x0, 1.6, z0); applyLook(); }
+      else if (t < 17) {
+        if (walking) { walking = false; ceiling.visible = false; amb.intensity = 0.25; lamp.intensity = 0; }
+        const k = (t - 9) / 8, e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2, a = y0 + Math.PI * 2 + e * Math.PI * 1.2;
+        const R = info.size * (0.3 + e * 0.6), hgt = 1.6 + e * (info.size * 0.9 + 2);
+        camera.position.set(info.cx + Math.sin(a) * R, hgt, info.cz + Math.cos(a) * R); camera.lookAt(info.cx, 0.5, info.cz);
+      } else { tour = null; rec?.stop(); orbit(); }
+    };
+  };
+  let alive = true, last = performance.now();
+  const loop = (now) => { if (!alive) return; const dt = Math.min(0.05, (now - last) / 1000); last = now; if (tour) tour(now); else stepWalk(dt); lamp.position.set(camera.position.x, Math.min(camera.position.y + 0.6, H - 0.1), camera.position.z); renderer.render(scene, camera); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+  const onResize = () => { camera.aspect = box.clientWidth / box.clientHeight; if (walking) camera.fov = walkFov(); camera.updateProjectionMatrix(); renderer.setSize(box.clientWidth, box.clientHeight); };
   addEventListener('resize', onResize);
-  $('#x3', m).onclick = () => { alive = false; removeEventListener('resize', onResize); renderer.dispose(); m.remove(); };
+  $('#x3', m).onclick = () => { if (rec) { rec.onstop = null; rec.stop(); } alive = false; removeEventListener('resize', onResize); renderer.dispose(); m.remove(); };
 }
 
 // ---------------- ייצוא DXF (R12 — נפתח באוטוקאד, סקצ'אפ, רביט) ----------------

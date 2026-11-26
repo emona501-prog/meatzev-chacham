@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.9.2';
+const APP_VERSION = '0.9.3';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -226,7 +226,8 @@ function renderProject(app) {
       <div class="muted">${p.plan?.walls?.length ? `${p.plan.walls.length} קירות · ${p.plan.openings.length} פתחים${p.plan.original ? ' · יש מצב קיים' : ''}` : 'סרטוט, תלת־ממד, ייצוא לאוטוקאד'}</div></div><span class="muted">‹</span></div>
     <div class="card"><div class="row"><div class="grow"><b>🧺 אוסף הפרויקט</b> <span class="muted">(${(p.picks || []).length})</span>
       <div class="muted">המוצרים שבחרתם לפרויקט — נכנסים אוטומטית לכל עיצוב</div></div><button class="btn sec sm" id="browseP">📖 דפדוף בקטלוג</button></div>
-      ${(p.picks || []).length ? `<div class="picks" id="picks">${p.picks.map(id => { const it = S.catalog.find(x => x.id === id); return it ? `<div class="pk" data-id="${id}"><img data-th="${id}"><button data-rm="${id}">✕</button><span>${esc(it.name)}</span></div>` : ''; }).join('')}</div>` : ''}</div>
+      ${(p.picks || []).length ? `<div class="picks" id="picks">${p.picks.map(id => { const it = S.catalog.find(x => x.id === id); return it ? `<div class="pk" data-id="${id}"><img data-th="${id}"><button data-rm="${id}">✕</button><span>${esc(it.name)}</span></div>` : ''; }).join('')}</div>
+        <button class="btn full" id="designPicks" style="margin-top:10px">🎨 השלב הבא: לשלב את המוצרים בחדר ›</button>` : `<div class="muted" style="margin-top:8px">בוחרים מוצרים ב"דפדוף בקטלוג" (⭐), ואז ממשיכים מכאן לעיצוב החדר.</div>`}</div>
     <div class="row" style="margin:6px 0 10px"><h2 class="grow" style="margin:0">חדרים</h2><button class="btn" id="newR">+ חדר</button></div>
     ${p.rooms.length ? p.rooms.map(r => {
       const c = catOf(r.cat);
@@ -241,6 +242,7 @@ function renderProject(app) {
   app.querySelectorAll('.pk').forEach(el => el.onclick = (e) => { if (e.target.dataset.rm) return; const it = S.catalog.find(x => x.id === el.dataset.id); if (it) flipbook([it], 0, p.id); });
   app.querySelectorAll('[data-rm]').forEach(bt => bt.onclick = () => { p.picks = (p.picks || []).filter(x => x !== bt.dataset.rm); p.updated = Date.now(); save(); render(); });
   $('#openPlan').onclick = () => go({ planOpen: true });
+  if ($('#designPicks')) $('#designPicks').onclick = () => designWithPicks(p);
   $('#editP').onclick = () => projectForm(p);
   $('#printP').onclick = () => printProject(p);
   $('#shareP').onclick = () => exportBackup([p]);
@@ -249,6 +251,34 @@ function renderProject(app) {
     for (const r of p.rooms) await deleteRoomImages(r);
     S.projects = S.projects.filter(x => x !== p); save(); go({ projectId: null });
   };
+}
+
+// 🎨 מהאוסף לעיצוב: בוחרים חדר (או מצלמים חדר חדש) ונכנסים לסטודיו עם המוצרים מסומנים
+function designWithPicks(p) {
+  modal('באיזה חדר לשלב את המוצרים?', `
+    <div class="muted" style="margin-bottom:8px">${(p.picks || []).length} מוצרים מהאוסף ייכנסו אוטומטית לעיצוב. בשלב הבא כותבים בדיוק איפה ואיך לשלב אותם.</div>
+    ${p.rooms.map(r => `<div class="card list-item" data-r="${r.id}"><div class="ic">${catOf(r.cat).icon}</div><div class="grow"><b>${esc(r.name)}</b><div class="muted">${r.photos.length ? r.photos.length + ' תמונות' : 'עוד אין תמונה — נצלם עכשיו'}</div></div><span class="muted">‹</span></div>`).join('')}
+    <button class="btn full" id="newRoomPh" style="margin-top:8px">📸 חדר חדש — לצלם עכשיו</button>`, (b, close) => {
+    const withPhoto = async (r) => {
+      if (!r.photos.length) {
+        toast('מצלמים או בוחרים תמונה של החדר');
+        const files = await pickPhoto(false); if (!files.length) return;
+        r.photos.push(await putImg(await compressImage(files[0]))); p.updated = Date.now(); save();
+      }
+      close(); go({ roomId: r.id, roomTab: 'design' }); setTimeout(() => studio(p, r), 150);
+    };
+    b.querySelectorAll('[data-r]').forEach(el => el.onclick = () => withPhoto(p.rooms.find(r => r.id === el.dataset.r)));
+    b.querySelector('#newRoomPh').onclick = () => {
+      b.innerHTML = `<label>סוג החדר</label><select id="qc">${ROOM_CATS.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}</select>
+        <label>שם (לא חובה)</label><input id="qn" placeholder="למשל: פינת אוכל">
+        <div style="height:12px"></div><button class="btn full" id="qok">📸 המשך לצילום</button>`;
+      b.querySelector('#qok').onclick = () => {
+        const cat = b.querySelector('#qc').value;
+        const r = { id: uid(), cat, name: b.querySelector('#qn').value.trim() || catOf(cat).name, L: '', W: '', H: '', photos: [], designs: [], checks: {}, notes: '', elements: [], created: Date.now() };
+        p.rooms.push(r); save(); withPhoto(r);
+      };
+    };
+  });
 }
 
 function roomForm(r) {
@@ -344,6 +374,7 @@ async function renderDesignTab(body, p, r) {
         <button class="btn sec sm" data-a="cont">✏️ להמשיך מכאן</button>
         <button class="btn sec sm" data-a="full">🔍 מסך מלא</button>
         <button class="btn sec sm" data-a="gif">🎞️ GIF לפני/אחרי</button>
+        <button class="btn sec sm" data-a="veo">🎬 סרטון AI${d.videos?.length ? ` (${d.videos.length})` : ''}</button>
         <button class="btn danger sm" data-a="del">מחיקה</button></div>`;
     dl.appendChild(card);
     const [before, after] = [await getImg(d.base), await getImg(d.result)];
@@ -352,10 +383,11 @@ async function renderDesignTab(body, p, r) {
     card.querySelector('[data-a=cont]').onclick = () => studio(p, r, d);
     card.querySelector('[data-a=full]').onclick = () => viewImage(after);
     card.querySelector('[data-a=gif]').onclick = () => gifDialog(before, after, `${p.name}-${r.name}`);
+    card.querySelector('[data-a=veo]').onclick = () => veoDialog(p, r, d, before, after);
     card.querySelector('[data-a=del]').onclick = async () => {
       if (!confirm('למחוק את ההדמיה?')) return;
       if (r.designs.some(x => x.base === d.result)) return toast('הדמיה אחרת נבנתה מההדמיה הזו. מוחקים קודם אותה.');
-      r.designs = r.designs.filter(x => x !== d); await delImg(d.result); save(); renderRoom($('#app'));
+      r.designs = r.designs.filter(x => x !== d); await delImg(d.result); for (const v of d.videos || []) await delImg(v.id); save(); renderRoom($('#app'));
     };
   }
 }
@@ -427,6 +459,143 @@ function gifDialog(before, after, name) {
   });
 }
 
+// =====================================================================
+// 🎬 סרטון הדמיה עם AI (Veo של גוגל) — מתוך הדמיה קיימת
+// סיור בחדר המעוצב / מעבר מלפני לאחרי / סיבוב סביב החדר
+const VEO_TIERS = {
+  lite:    { name: 'חסכוני', want: /lite/, price: 0.05, note: 'איכות סבירה, הכי זול' },
+  fast:    { name: 'מהיר', want: /fast/, price: 0.10, note: 'מומלץ — איכות טובה במחיר נמוך' },
+  quality: { name: 'איכותי', want: /^(?!.*(fast|lite)).*/, price: 0.40, note: 'הכי יפה ומדויק, יקר פי 4' }
+};
+const VEO_FALLBACK = ['veo-3.1-fast-generate-preview', 'veo-3.1-generate-preview', 'veo-3.0-fast-generate-001', 'veo-3.0-generate-001'];
+const VEO_MODES = {
+  walk: { name: '🚶 סיור בחדר המעוצב', needsAfter: true,
+    prompt: 'Smooth cinematic real-estate walkthrough video inside this exact interior. The camera slowly glides forward into the room at eye level (1.6 m) with a gentle turn, revealing the space. Keep every piece of furniture, material, color, lighting and layout exactly as in the image. Photorealistic, steady gimbal motion, soft natural light. No people, no text, no added objects.' },
+  orbit: { name: '🔄 תנועה סביב החדר', needsAfter: true,
+    prompt: 'Slow cinematic orbit / parallax camera move around this exact interior room, as if filmed by a professional interior photographer with a gimbal. Keep the design, furniture, materials and colors exactly as shown. Photorealistic, no people, no text, no new objects.' },
+  ba: { name: '✨ מעבר מלפני לאחרי', needsAfter: true, lastFrame: true,
+    prompt: 'Magical smooth renovation transformation of this room: starting from the original room, the new design gradually appears — walls, floor, furniture and decor morph and settle into place — ending exactly on the final designed room. The camera stays almost still. Photorealistic, elegant, no people, no text.' }
+};
+async function veoModels(key) {
+  if (veoModels.cache) return veoModels.cache;
+  try {
+    const r = await fetchT('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=' + encodeURIComponent(key), {}, 20000);
+    const j = await r.json();
+    const list = (j.models || []).map(m => m.name.replace('models/', '')).filter(n => /^veo/.test(n));
+    veoModels.cache = list.length ? list : VEO_FALLBACK;
+  } catch { veoModels.cache = VEO_FALLBACK; }
+  return veoModels.cache;
+}
+function veoPick(all, t) {
+  const ver = n => parseFloat((/veo-(\d+(\.\d+)?)/.exec(n) || [0, 0])[1]);
+  const sorted = all.slice().sort((a, b) => ver(b) - ver(a) || (/preview/.test(a) ? 1 : -1));
+  const want = sorted.filter(n => VEO_TIERS[t].want.test(n.replace(/^veo-[\d.]+-/, '')));
+  // אם אין דגם בדרגה המבוקשת — עוברים לדרגה הקרובה
+  const order = t === 'lite' ? ['lite', 'fast', 'quality'] : t === 'fast' ? ['fast', 'lite', 'quality'] : ['quality', 'fast', 'lite'];
+  const rest = order.slice(1).flatMap(o => sorted.filter(n => VEO_TIERS[o].want.test(n.replace(/^veo-[\d.]+-/, ''))));
+  return [...new Set([...want, ...rest])];
+}
+async function toVeoImage(src) {
+  const im = await loadImg(src); const s = Math.min(1, 1280 / Math.max(im.width, im.height));
+  const c = document.createElement('canvas'); c.width = Math.round(im.width * s); c.height = Math.round(im.height * s);
+  c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+  return { bytesBase64Encoded: c.toDataURL('image/jpeg', 0.9).split(',')[1], mimeType: 'image/jpeg', portrait: c.height > c.width };
+}
+async function makeVeoVideo({ before, after, mode, tierKey, extra, onStatus }) {
+  const key = (S.settings.apiKey || '').trim(); if (!key) throw new Error('צריך מפתח AI בהגדרות');
+  const md = VEO_MODES[mode];
+  const first = await toVeoImage(mode === 'ba' ? before : after);
+  const inst = { prompt: md.prompt + (extra ? ' Extra direction: ' + extra : ''), image: { bytesBase64Encoded: first.bytesBase64Encoded, mimeType: 'image/jpeg' } };
+  if (md.lastFrame) { const l = await toVeoImage(after); inst.lastFrame = { bytesBase64Encoded: l.bytesBase64Encoded, mimeType: 'image/jpeg' }; }
+  const params = { aspectRatio: first.portrait ? '9:16' : '16:9', negativePrompt: 'people, person, text, watermark, distorted furniture, warped walls, blurry' };
+  const models = veoPick(await veoModels(key), tierKey);
+  AI_LOG = []; let op = null, used = null, lastErr = '';
+  for (const model of models) {
+    onStatus && onStatus(`שולח לגוגל (${model})…`);
+    let body = JSON.stringify({ instances: [inst], parameters: params });
+    let r = await gFetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`, key, body, 60000);
+    let j = await r.json().catch(() => ({}));
+    // חלק מהדגמים לא מקבלים פרמטר מסוים — מנסים שוב בלי הפרמטרים הנוספים
+    if (r.status === 400 && /negativePrompt|aspectRatio|not supported/i.test(j.error?.message || '') && !/lastFrame/i.test(j.error?.message || '')) {
+      body = JSON.stringify({ instances: [inst] });
+      r = await gFetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`, key, body, 60000); j = await r.json().catch(() => ({}));
+    }
+    AI_LOG.push({ model, status: r.status, msg: j.error?.message || (j.name ? 'ok' : '') });
+    if (r.ok && j.name) { op = j.name; used = model; break; }
+    lastErr = j.error?.message || ('שגיאה ' + r.status);
+  }
+  if (!op) {
+    if (/billing|paid|quota|RESOURCE_EXHAUSTED|429/i.test(lastErr + AI_LOG.map(l => l.status).join())) throw new Error('סרטוני AI זמינים רק במפתח עם חיוב (אשראי) מופעל, או שנגמרה המכסה. ' + lastErr);
+    throw new Error(lastErr);
+  }
+  const t0 = Date.now();
+  while (true) {
+    await new Promise(r => setTimeout(r, 8000));
+    const sec = Math.round((Date.now() - t0) / 1000);
+    onStatus && onStatus(`גוגל מצלם את הסרטון… ${sec} שניות (בדרך כלל 1–3 דקות)`);
+    if (sec > 600) throw new Error('לקח יותר מ-10 דקות. נסו שוב מאוחר יותר.');
+    let s; try { s = await (await fetchT(`https://generativelanguage.googleapis.com/v1beta/${op}?key=${encodeURIComponent(key)}`, {}, 30000)).json(); } catch { continue; }
+    if (s.error) throw new Error(s.error.message || 'שגיאה ביצירת הסרטון');
+    if (!s.done) continue;
+    const res = s.response?.generateVideoResponse || s.response || {};
+    const sample = (res.generatedSamples || res.videos || [])[0];
+    const uri = sample?.video?.uri || sample?.uri;
+    if (res.raiMediaFilteredReasons?.length) throw new Error('גוגל סינן את הסרטון: ' + res.raiMediaFilteredReasons.join(', '));
+    if (!uri) throw new Error('הסרטון לא חזר מגוגל');
+    onStatus && onStatus('מוריד את הסרטון…');
+    const vr = await fetchT(uri + (uri.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(key), {}, 120000);
+    if (!vr.ok) throw new Error('הורדת הסרטון נכשלה (' + vr.status + ')');
+    return { blob: await vr.blob(), model: used };
+  }
+}
+const blobToData = (b) => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
+async function dataToBlob(d) { return await (await fetch(d)).blob(); }
+function videoPlayer(b, blob, fname) {
+  const url = URL.createObjectURL(blob);
+  const file = new File([blob], fname, { type: blob.type || 'video/mp4' });
+  b.innerHTML = `<video src="${url}" controls autoplay loop playsinline style="width:100%;border-radius:12px;background:#000"></video>
+    <div class="muted" style="text-align:center;margin:6px 0">${(blob.size / 1048576).toFixed(1)} MB</div>
+    <div class="grid2"><button class="btn" id="vShare">📤 שיתוף</button><button class="btn sec" id="vSave">💾 הורדה</button></div>`;
+  b.querySelector('#vSave').onclick = () => { const a = document.createElement('a'); a.href = url; a.download = fname; a.click(); toast('נשמר בהורדות'); };
+  b.querySelector('#vShare').onclick = async () => {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: 'סרטון הדמיה' }); } catch {} }
+    else b.querySelector('#vSave').click();
+  };
+}
+function veoDialog(p, r, d, before, after) {
+  const name = `${p.name}-${r.name}`.replace(/[\\/:*?"<>|]/g, '-');
+  const t0 = S.settings.veoTier || 'fast';
+  modal('🎬 סרטון הדמיה עם AI', `
+    ${d.videos?.length ? `<div class="card" style="margin:0 0 10px"><b>סרטונים שכבר נוצרו</b><div class="row" style="margin-top:6px">${d.videos.map((v, i) => `<button class="btn sec sm" data-v="${i}">▶️ ${esc(VEO_MODES[v.mode]?.name.replace(/^\S+\s/, '') || 'סרטון')} ${i + 1}</button>`).join('')}</div></div>` : ''}
+    <label>איזה סרטון?</label>
+    <div class="chips" id="vMode">${Object.entries(VEO_MODES).map(([k, m], i) => `<button class="chip${i === 0 ? ' on' : ''}" data-m="${k}">${m.name}</button>`).join('')}</div>
+    <label>איכות</label>
+    <div class="chips" id="vTier">${Object.entries(VEO_TIERS).map(([k, t]) => `<button class="chip${k === t0 ? ' on' : ''}" data-t="${k}">${t.name} · ~$${(t.price * 8).toFixed(2)}</button>`).join('')}</div>
+    <div class="muted" id="vNote" style="margin-top:4px"></div>
+    <label>הכוונה נוספת (לא חובה)</label><input id="vExtra" placeholder="למשל: להתחיל מהחלון ולהסתובב לכיוון הספה">
+    <div class="muted" style="margin-top:8px">סרטון של 8 שניות. לוקח בדרך כלל 1–3 דקות. דורש מפתח עם חיוב מופעל — המחיר מחויב בגוגל לפי שנייה.</div>
+    <button class="btn" id="vGo" style="width:100%;margin-top:12px">🎬 ליצור סרטון</button>
+    <div id="vOut" style="margin-top:12px"></div>`, (b) => {
+    let mode = 'walk', tk = t0;
+    const note = () => { b.querySelector('#vNote').textContent = VEO_TIERS[tk].note; }; note();
+    b.querySelectorAll('[data-m]').forEach(x => x.onclick = () => { mode = x.dataset.m; b.querySelectorAll('[data-m]').forEach(y => y.classList.toggle('on', y === x)); });
+    b.querySelectorAll('[data-t]').forEach(x => x.onclick = () => { tk = x.dataset.t; S.settings.veoTier = tk; save(); b.querySelectorAll('[data-t]').forEach(y => y.classList.toggle('on', y === x)); note(); });
+    b.querySelectorAll('[data-v]').forEach(x => x.onclick = async () => { const v = d.videos[+x.dataset.v]; const data = await getImg(v.id); if (data) videoPlayer(b.querySelector('#vOut'), await dataToBlob(data), `${name}-סרטון.mp4`); else toast('הסרטון לא נמצא במכשיר הזה'); });
+    b.querySelector('#vGo').onclick = async () => {
+      const out = b.querySelector('#vOut'), go = b.querySelector('#vGo');
+      if (!confirm(`ליצור סרטון "${VEO_MODES[mode].name.replace(/^\S+\s/, '')}" באיכות ${VEO_TIERS[tk].name}?\nעלות משוערת: כ-$${(VEO_TIERS[tk].price * 8).toFixed(2)}`)) return;
+      go.disabled = true; out.innerHTML = `<div class="muted" style="text-align:center"><div class="spinner"></div><span id="vSt">מתחיל…</span></div>`;
+      try {
+        const { blob, model } = await makeVeoVideo({ before, after, mode, tierKey: tk, extra: b.querySelector('#vExtra').value.trim(), onStatus: s => { const e = out.querySelector('#vSt'); if (e) e.textContent = s; } });
+        // שומרים במכשיר (סרטונים לא נשלחים למאגר המשותף — כבדים מדי)
+        try { const id = await putImg(await blobToData(blob)); (d.videos = d.videos || []).push({ id, mode, model, created: Date.now() }); save(); } catch {}
+        videoPlayer(out, blob, `${name}-סרטון.mp4`);
+      } catch (e) { out.innerHTML = `<div class="rule red"><span class="dot red"></span><div>לא הצלחתי ליצור סרטון: ${esc(e.message)}</div></div>${aiLogHtml()}`; }
+      go.disabled = false;
+    };
+  });
+}
+
 function beforeAfter(wrap, before, after) {
   wrap.innerHTML = `<div class="ba"><img src="${before}"><div class="after"><img src="${after}"></div><div class="handle"></div>
     <span class="lbl" style="right:8px">אחרי</span><span class="lbl" style="left:8px">לפני</span></div>`;
@@ -444,7 +613,7 @@ function flipbook(list, start = 0, projectId = '') {
   if (!list.length) return toast('אין מוצרים להצגה');
   let i = Math.max(0, Math.min(start, list.length - 1)), busy = false;
   const ov = document.createElement('div'); ov.id = 'fbook';
-  ov.innerHTML = `<div class="fb-top"><button class="fb-x" id="fbX">✕</button><span id="fbN"></span><span style="display:flex;gap:8px"><button class="fb-x" id="fbRev" title="הפיכת כיוון הדפדוף">⇄</button><button class="fb-x" id="fbZ">🔍</button></span></div>
+  ov.innerHTML = `<div class="fb-top"><button class="fb-x" id="fbX">✕</button><span id="fbN"></span><span style="display:flex;gap:8px">${projectId ? '<button class="fb-x" id="fbDone" style="width:auto;padding:0 12px;border-radius:18px;font-size:14px">✓ סיימתי ›</button>' : ''}<button class="fb-x" id="fbRev" title="הפיכת כיוון הדפדוף">⇄</button><button class="fb-x" id="fbZ">🔍</button></span></div>
     <div class="fb-stage" id="fbStage"></div>
     <div class="fb-bot"><button class="btn sec" id="fbPrev">‹ הקודם</button><button class="btn" id="fbPick"></button><button class="btn sec" id="fbNext">הבא ›</button></div>`;
   document.body.appendChild(ov); document.body.style.overflow = 'hidden';
@@ -513,6 +682,11 @@ function flipbook(list, start = 0, projectId = '') {
   ov.querySelector('#fbPrev').onclick = () => turn(-1);
   ov.querySelector('#fbZ').onclick = () => { const im = cur.querySelector('img'); if (im?.src) zoomView(im.src); };
   ov.querySelector('#fbX').onclick = () => { ov.remove(); document.body.style.overflow = ''; render(); };
+  if (ov.querySelector('#fbDone')) ov.querySelector('#fbDone').onclick = () => {
+    ov.remove(); document.body.style.overflow = '';
+    const p = proj(projectId); go({ projectId, roomId: null, planOpen: false });
+    if (p && (p.picks || []).length) setTimeout(() => designWithPicks(p), 250);
+  };
   ov.querySelector('#fbPick').onclick = () => {
     const it = list[i];
     const addTo = (p) => { p.picks = p.picks || []; if (p.picks.includes(it.id)) p.picks = p.picks.filter(x => x !== it.id); else p.picks.push(it.id); p.updated = Date.now(); save(); refresh(); toast(p.picks.includes(it.id) ? `נוסף לאוסף של "${p.name}"` : `הוסר מהאוסף של "${p.name}"`); };
@@ -571,8 +745,10 @@ function studio(p, r, fromDesign) {
       <div class="muted" style="white-space:pre-wrap;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:13px">${esc(roomNotes)}</div>` : ''}
     <label>💡 גוון האור (לא חובה)</label>
     <div class="chips" id="tones">${LIGHT_TONES.map(([k, t]) => `<span class="chip ${(sel.tone || '') === k ? 'on' : ''}" data-tone="${k}">${t}</span>`).join('')}</div>
-    <label>5. מה לשנות? (במילים שלך)</label>
-    <textarea id="ins" placeholder="למשל: להחליף את הריצוף לאריח שבחרתי, לצבוע את הקיר מאחורי המיטה בבז' חם, להשאיר את הארון כמו שהוא">${esc('')}</textarea>
+    <label>5. מה לשנות ואיפה לשים כל מוצר? (במילים שלך)</label>
+    <div class="muted" id="insHint" style="margin-bottom:4px"></div>
+    <div class="chips" id="insChips" style="margin-bottom:6px"></div>
+    <textarea id="ins" rows="4" placeholder="${picks.length ? 'למשל: את סט הפמוטים הזהב לשים במרכז שולחן האוכל, ואת פמוט הגליל על המזנון. כל השאר נשאר כמו שהוא.' : 'למשל: להחליף את הריצוף לאריח שבחרתי, לצבוע את הקיר מאחורי המיטה בבז\' חם, להשאיר את הארון כמו שהוא'}">${esc('')}</textarea>
     <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="keep" checked style="width:auto"> לשנות רק מה שביקשתי, כל השאר נשאר בדיוק אותו דבר</label>
     <label>6. רמת איכות</label>
     <div id="tierSel" style="display:flex;gap:6px">${Object.entries(TIERS).map(([k, t]) => `<button type="button" class="btn ${k === tier() ? '' : 'sec'} sm" data-t="${k}" style="flex:1;padding:8px 4px;line-height:1.3">${t.label}<br><small style="font-weight:400">${t.price}</small></button>`).join('')}</div>
@@ -598,7 +774,18 @@ function studio(p, r, fromDesign) {
       ch.classList.toggle('on', on); sel.style = on ? ch.textContent : '';
     });
     const itemsEl = $('#items', b);
-    const selCount = () => { const c = $('#selCount', b); if (c) c.textContent = sel.items.size ? `נבחרו ${sel.items.size} מוצרים` : 'לוחצים על תמונה כדי לבחור'; };
+    // צ'יפים של המוצרים שנבחרו — לחיצה מוסיפה את שם המוצר להנחיה, ואז כותבים איפה לשים אותו
+    const drawInsChips = () => {
+      const box = $('#insChips', b), hint = $('#insHint', b); if (!box) return;
+      const its = [...sel.items].map(id => S.catalog.find(x => x.id === id)).filter(Boolean);
+      hint.textContent = its.length ? 'לוחצים על מוצר כדי להכניס את השם שלו, וממשיכים לכתוב איפה לשים אותו:' : '';
+      box.innerHTML = its.map(it => `<span class="chip" data-ins="${it.id}">＋ ${esc(it.name)}</span>`).join('');
+      box.querySelectorAll('[data-ins]').forEach(ch => ch.onclick = () => {
+        const ta = $('#ins', b), it = S.catalog.find(x => x.id === ch.dataset.ins);
+        ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + `את "${it.name}" לשים `; ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+      });
+    };
+    const selCount = () => { const c = $('#selCount', b); if (c) c.textContent = sel.items.size ? `נבחרו ${sel.items.size} מוצרים` : 'לוחצים על תמונה כדי לבחור'; drawInsChips(); };
     const showCat = (cat) => {
       if (!itemsEl) return; itemsEl.innerHTML = '';
       for (const it of S.catalog.filter(x => x.cat === cat)) {
