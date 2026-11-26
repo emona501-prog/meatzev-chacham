@@ -161,9 +161,9 @@ function hitOpening(pt) {
   }
   return null;
 }
-function snap(pt, from) {
+function snap(pt, from, skip) {
   const tol = 16 / P.view.s;
-  for (const w of P.plan.walls) for (const e of [[w.x1, w.y1], [w.x2, w.y2]]) if (Math.hypot(pt.x - e[0], pt.y - e[1]) < tol) return { x: e[0], y: e[1], snapped: true };
+  for (const w of P.plan.walls) if (w !== skip) for (const e of [[w.x1, w.y1], [w.x2, w.y2]]) if (Math.hypot(pt.x - e[0], pt.y - e[1]) < tol) return { x: e[0], y: e[1], snapped: true };
   let x = Math.round(pt.x / 5) * 5, y = Math.round(pt.y / 5) * 5;
   if (from) {
     const dx = x - from.x, dy = y - from.y;
@@ -262,6 +262,13 @@ function draw() {
       <text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 18 / s}" font-size="${15 / s}" text-anchor="middle" fill="#a86b4a" stroke="#fff" stroke-width="${4 / s}" paint-order="stroke" font-weight="700">${fmt(L)} ס"מ</text>`;
   }
   if (P.cursor && (P.tool === 'wall' || P.tool === 'calib')) extra += `<circle cx="${P.cursor.x}" cy="${P.cursor.y}" r="${6 / s}" fill="${P.cursor.snapped ? '#2e8b57' : '#a86b4a'}"/>`;
+  const sw = selWall();
+  if (sw) {
+    const mx = (sw.x1 + sw.x2) / 2, my = (sw.y1 + sw.y2) / 2;
+    for (const [x, y] of [[sw.x1, sw.y1], [sw.x2, sw.y2]]) extra += `<circle cx="${x}" cy="${y}" r="${11 / s}" fill="#fff" stroke="#a86b4a" stroke-width="${3 / s}"/>`;
+    extra += `<circle cx="${mx}" cy="${my}" r="${13 / s}" fill="#a86b4a" stroke="#fff" stroke-width="${2 / s}"/><text x="${mx}" y="${my}" font-size="${15 / s}" text-anchor="middle" dominant-baseline="central" fill="#fff">✥</text>`;
+    if (P.gesture?.type === 'wend' || P.gesture?.type === 'wmove') extra += `<text x="${mx}" y="${my - 26 / s}" font-size="${16 / s}" text-anchor="middle" fill="#a86b4a" stroke="#fff" stroke-width="${4 / s}" paint-order="stroke" font-weight="700">${fmt(len(sw))} ס"מ</text>`;
+  }
   const sf = selFurn();
   if (sf) { // ידית סיבוב + מסגרת + מרחקים לקירות בזמן גרירה
     const a = (sf.rot || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a), hd = sf.d / 2 + 34 / s;
@@ -293,7 +300,7 @@ function open(app, p) {
   app.innerHTML = `
     <div class="card" style="padding:10px">
       <div class="chips" id="tools">
-        <span class="chip" data-t="select">👆 בחירה</span><span class="chip" data-t="pan">✋ הזזה</span>
+        <span class="chip" data-t="select">👆 בחירה</span><span class="chip" data-t="pan">✋ גלילת מסך</span>
         <span class="chip" data-t="wall">🧱 קיר</span><span class="chip" data-t="door">🚪 דלת</span><span class="chip" data-t="window">🪟 חלון</span><span class="chip" data-t="furn">🛋️ ריהוט</span>
       </div>
       <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sec sm" id="hUndo" style="flex:1">↶ ביטול</button><button class="btn sec sm" id="hRedo" style="flex:1">↷ חזרה</button><button class="btn sec sm" id="hClear" style="flex:1">🧹 ניקוי</button></div>
@@ -399,8 +406,8 @@ function setTool(t) {
   $('#wtSel').value = P.wallType;
   $('#chainBar').style.display = 'none'; renderFBar();
   const hints = {
-    select: 'לוחצים על קיר, פתח או רהיט כדי לערוך. רהיט גוררים באצבע, ⟳ מסובב. גרירה על רקע ריק מזיזה את התוכנית, שתי אצבעות לזום.',
-    pan: 'גרירה מזיזה את התוכנית. שתי אצבעות לזום.',
+    select: 'נוגעים בקיר, פתח או רהיט כדי לערוך. קיר ורהיט גוררים באצבע · עיגול בקצה הקיר משנה אורך · ⟳ מסובב רהיט. גרירה על רקע ריק מזיזה את המבט, שתי אצבעות לזום.',
+    pan: 'גרירה מזיזה את המבט על התוכנית (לא את הקירות). כדי להזיז קיר או רהיט — עוברים ל👆 בחירה וגוררים אותו.',
     wall: 'נוגעים בנקודת ההתחלה, ואז בנקודת הסוף (אפשר לגרור כדי לכוון). הקיר הבא ממשיך מאותה נקודה. מידות נצמדות ל-5 ס"מ.',
     door: 'נוגעים על קיר כדי להוסיף דלת (90 ס"מ).',
     window: 'נוגעים על קיר כדי להוסיף חלון (120 ס"מ).',
@@ -447,7 +454,14 @@ function bindPointer() {
     if (P.tool === 'select' && !P.showOriginal) {
       const rf = hitRotHandle(pt);
       if (rf) Object.assign(P.gesture, { type: 'rot', f: rf });
-      else { const f = hitFurn(pt); if (f) { const was = P.sel?.kind === 'furn' && P.sel.id === f.id; P.sel = { kind: 'furn', id: f.id }; if (!was) { draw(); renderProps(); } Object.assign(P.gesture, { type: 'drag', f, ox: f.x - pt.x, oy: f.y - pt.y }); } }
+      else { const f = hitFurn(pt); if (f) { const was = P.sel?.kind === 'furn' && P.sel.id === f.id; P.sel = { kind: 'furn', id: f.id }; if (!was) { draw(); renderProps(); } Object.assign(P.gesture, { type: 'drag', f, ox: f.x - pt.x, oy: f.y - pt.y }); }
+        else { const he = hitWallEnd(pt);
+          if (he) { if (he.w.type === 'mamad') toast('קיר ממ"ד — אסור להזיז'); else Object.assign(P.gesture, { type: 'wend', w: he.w, end: he.end, links: linkedEnds(he.w, he.end) }); }
+          else if (!hitOpening(pt)) { const h = hitWall(pt); if (h) {
+            const was = P.sel?.kind === 'wall' && P.sel.id === h.w.id; P.sel = { kind: 'wall', id: h.w.id }; if (!was) { draw(); renderProps(); }
+            if (h.w.type !== 'mamad') Object.assign(P.gesture, { type: 'wmove', w: h.w, px: pt.x, py: pt.y, ox: 0, oy: 0, links: [...linkedEnds(h.w, 1), ...linkedEnds(h.w, 2)] });
+          } }
+        } }
     }
     if (drawing) { P.cursor = snap(pt, P.tool === 'wall' ? P.chain : P.calib?.a); draw(); }
   });
@@ -468,6 +482,10 @@ function bindPointer() {
     if (Math.hypot(e.clientX - g.sx, e.clientY - g.sy) > 6) g.moved = true;
     if (g.type === 'draw') { P.cursor = snap(toWorld(e.clientX, e.clientY), P.tool === 'wall' ? P.chain : P.calib?.a); draw(); }
     else if (g.type === 'drag') { if (g.moved) { const w = toWorld(e.clientX, e.clientY), st = P.view.s > 1.2 ? 1 : P.view.s > 0.5 ? 2 : 5; g.f.x = Math.round((w.x + g.ox) / st) * st; g.f.y = Math.round((w.y + g.oy) / st) * st; draw(); } }
+    else if (g.type === 'wmove') { if (g.moved) { const w = toWorld(e.clientX, e.clientY), st = P.view.s > 1.2 ? 1 : 5;
+        const tx = Math.round((w.x - g.px) / st) * st, ty = Math.round((w.y - g.py) / st) * st; moveWallBy(g.w, tx - g.ox, ty - g.oy, g.links); g.ox = tx; g.oy = ty; draw(); } }
+    else if (g.type === 'wend') { g.moved = true; const w = g.w, other = g.end === 1 ? { x: w.x2, y: w.y2 } : { x: w.x1, y: w.y1 };
+      const p = snap(toWorld(e.clientX, e.clientY), other, w); w['x' + g.end] = p.x; w['y' + g.end] = p.y; for (const [o, k] of g.links) { o['x' + k] = p.x; o['y' + k] = p.y; clampOpenings(o); } clampOpenings(w); draw(); }
     else if (g.type === 'rot') {
       const w = toWorld(e.clientX, e.clientY); let ang = Math.atan2(w.x - g.f.x, -(w.y - g.f.y)) * 180 / Math.PI; ang = (ang + 360) % 360;
       ang = Math.round(ang / 5) * 5; const near = Math.round(ang / 90) * 90; if (Math.abs(ang - near) <= 5) ang = near % 360; // "מגנט" לישר
@@ -482,6 +500,7 @@ function bindPointer() {
     if (g?.type === 'pinch') { if (P.pointers.size === 0) P.gesture = null; return; }
     P.gesture = null; if (!g) return;
     if (g.type === 'draw' && P.cursor) return commitPoint(P.cursor);
+    if (g.type === 'wmove' || g.type === 'wend') { if (g.moved) { if (g.w.type === 'bearing') toast('⚠️ קיר נושא — שינוי מחייב קונסטרוקטור'); changed(); } draw(); renderProps(); return; }
     if (g.type === 'drag' || g.type === 'rot') { if (g.moved) { changed(); draw(); renderProps(); } else if (g.type === 'drag') { draw(); renderProps(); } return; }
     if (g.type === 'tap' && !g.moved) onTap(toWorld(e.clientX, e.clientY));
   };
@@ -504,6 +523,12 @@ function commitPoint(pt) {
   P.chain = { x: pt.x, y: pt.y }; P.cursor = null; changed(); draw(); renderProps();
 }
 
+function selWall() { if (P.sel?.kind !== 'wall' || P.showOriginal || P.tool !== 'select') return null; return P.plan.walls.find(x => x.id === P.sel.id) || null; }
+function hitWallEnd(pt) { const w = selWall(); if (!w) return null; const r = 22 / P.view.s; if (Math.hypot(pt.x - w.x1, pt.y - w.y1) < r) return { w, end: 1 }; if (Math.hypot(pt.x - w.x2, pt.y - w.y2) < r) return { w, end: 2 }; return null; }
+// קצוות של קירות אחרים שמחוברים לקצה הזה — זזים איתו כדי שהבית יישאר מחובר
+function linkedEnds(w, end) { const x = w['x' + end], y = w['y' + end], out = []; for (const o of P.plan.walls) if (o !== w) for (const e of [1, 2]) if (Math.abs(o['x' + e] - x) < 1 && Math.abs(o['y' + e] - y) < 1) out.push([o, e]); return out; }
+function clampOpenings(w) { const L = len(w); for (const o of P.plan.openings) if (o.wallId === w.id) { o.width = Math.min(o.width, Math.max(30, L - 10)); o.pos = Math.max(o.width / 2, Math.min(L - o.width / 2, o.pos)); } }
+function moveWallBy(w, dx, dy, links) { w.x1 += dx; w.y1 += dy; w.x2 += dx; w.y2 += dy; for (const [o, e] of links) { o['x' + e] += dx; o['y' + e] += dy; clampOpenings(o); } }
 function selFurn() { if (P.sel?.kind !== 'furn' || P.showOriginal || P.tool !== 'select') return null; return (cur().furniture || []).find(x => x.id === P.sel.id) || null; }
 function hitRotHandle(pt) {
   const f = selFurn(); if (!f) return null; const s = P.view.s, a = (f.rot || 0) * Math.PI / 180, hd = f.d / 2 + 34 / s;
@@ -566,7 +591,22 @@ function onTap(pt) {
 
 // ---------------- פאנל מאפיינים ----------------
 function renderFBar() {
-  const bar = $('#fbar'); if (!bar) return; const f = selFurn();
+  const bar = $('#fbar'); if (!bar) return; const f = selFurn(), wsel = selWall();
+  if (wsel && wsel.type !== 'mamad') {
+    bar.style.display = 'flex';
+    bar.innerHTML = `<button class="btn sec sm" data-n="0,-1">▲</button><button class="btn sec sm" data-n="0,1">▼</button><button class="btn sec sm" data-n="1,0">▶</button><button class="btn sec sm" data-n="-1,0">◀</button><button class="btn sm" id="fok">✓</button>
+      <div class="muted" style="width:100%;text-align:center;font-size:11px">גוררים את הקיר (✥) להזזה · גוררים עיגול בקצה לשינוי אורך וכיוון · חצים = ס"מ אחד</div>`;
+    const links = [...linkedEnds(wsel, 1), ...linkedEnds(wsel, 2)];
+    bar.querySelectorAll('[data-n]').forEach(b => {
+      const [dx, dy] = b.dataset.n.split(',').map(Number); let t = null, n = 0;
+      const step = () => { const k = n++ > 8 ? 5 : 1; moveWallBy(wsel, dx * k, dy * k, links); draw(); };
+      b.onpointerdown = (e) => { e.preventDefault(); n = 0; step(); t = setInterval(step, 120); };
+      const stop = () => { if (t) { clearInterval(t); t = null; changed(); draw(); renderProps(); } };
+      b.onpointerup = stop; b.onpointerleave = stop; b.onpointercancel = stop;
+    });
+    $('#fok', bar).onclick = () => { P.sel = null; draw(); renderProps(); };
+    return;
+  }
   if (!f) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
   bar.innerHTML = `<button class="btn sec sm" data-n="0,-1">▲</button><button class="btn sec sm" data-n="0,1">▼</button><button class="btn sec sm" data-n="1,0">▶</button><button class="btn sec sm" data-n="-1,0">◀</button>
@@ -631,6 +671,8 @@ function renderProps() {
       <label>סוג הקיר</label><select id="wt" ${ro ? 'disabled' : ''}>${Object.entries(WALL_TYPES).map(([k, v]) => `<option value="${k}" ${w.type === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select>
       <div class="grid2"><div><label>אורך (ס"מ)</label><input id="wl" type="number" inputmode="numeric" value="${fmt(len(w))}" ${ro ? 'disabled' : ''}></div>
         <div><label>עובי (ס"מ)</label><input id="wk" type="number" inputmode="numeric" value="${w.thick}" ${ro ? 'disabled' : ''}></div></div>
+      <div class="grid2"><div><label>זווית (°)</label><input id="wa" type="number" inputmode="numeric" value="${Math.round(((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI) + 360) % 360)}" ${ro || w.type === 'mamad' ? 'disabled' : ''}></div><div></div></div>
+      ${ro ? '' : '<div class="muted" style="margin-top:6px">✥ גוררים את הקיר להזזה · העיגולים בקצוות = שינוי אורך וכיוון (נצמד לישר ולקירות אחרים) · קירות מחוברים זזים איתו</div>'}
       ${w.type === 'mamad' ? '<div class="rule red" style="margin-top:8px"><span class="dot red"></span><div>קיר ממ"ד — אסור לפרוץ, לקצר או להרוס.</div></div>' : ''}
       ${w.type === 'bearing' ? '<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div>קיר נושא — כל שינוי מחייב קונסטרוקטור.</div></div>' : ''}
       ${w.type === 'unknown' ? '<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div>לא ידוע אם הקיר נושא. כדאי לבדוק ולסמן.</div></div>' : ''}
@@ -642,6 +684,11 @@ function renderProps() {
       w.type = nt; w.thick = WALL_TYPES[nt].thick; changed(); draw(); renderProps();
     };
     $('#wk').onchange = e => { w.thick = Math.max(5, +e.target.value || w.thick); changed(); draw(); };
+    $('#wa').onchange = e => { // מסובב סביב נקודת ההתחלה; קירות שמחוברים לקצה השני נמשכים איתו
+      const a = (+e.target.value || 0) * Math.PI / 180, L = len(w), links = linkedEnds(w, 2);
+      w.x2 = Math.round(w.x1 + Math.cos(a) * L); w.y2 = Math.round(w.y1 + Math.sin(a) * L); for (const [o, k] of links) { o['x' + k] = w.x2; o['y' + k] = w.y2; clampOpenings(o); }
+      changed(); draw(); setTimeout(renderProps, 0);
+    };
     $('#wl').onchange = e => {
       const nl = +e.target.value; if (!(nl > 0)) return;
       if (w.type === 'mamad') { alertBox({ msg: 'אסור לקצר או להאריך קיר ממ"ד.' }); e.target.value = fmt(len(w)); return; }
