@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.8.2';
+const APP_VERSION = '0.8.3';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -957,9 +957,39 @@ function selBar(list) {
   let bar = $('#selBar');
   if (!V.selMode || V.tab !== 'catalog') { if (bar) bar.remove(); return; }
   if (!bar) { bar = document.createElement('div'); bar.id = 'selBar'; document.body.appendChild(bar); }
-  bar.innerHTML = `<b>נבחרו ${CSEL.size}</b><button class="btn sec sm" id="sbAll">בחר הכל (${list.length})</button><button class="btn sm" id="sbMove" ${CSEL.size ? '' : 'disabled'}>📂 העבר ל…</button>`;
+  const dis = CSEL.size ? '' : 'disabled';
+  bar.innerHTML = `<div class="sbr"><b>נבחרו ${CSEL.size}</b><button class="btn sec sm" id="sbAll">${list.length && list.every(x => CSEL.has(x.id)) ? 'בטל הכל' : `בחר הכל (${list.length})`}</button></div>
+    <div class="sbr"><button class="btn sm" id="sbMove" ${dis}>📂 העברה</button><button class="btn sm" id="sbEdit" ${dis}>✏️ עריכה</button><button class="btn sm" id="sbDel" ${dis} style="background:#b3261e">🗑 מחיקה</button></div>`;
   bar.querySelector('#sbAll').onclick = () => { const all = list.every(x => CSEL.has(x.id)); list.forEach(x => all ? CSEL.delete(x.id) : CSEL.add(x.id)); stay({}); };
   bar.querySelector('#sbMove').onclick = () => moveForm([...CSEL]);
+  bar.querySelector('#sbEdit').onclick = () => bulkEditForm([...CSEL]);
+  bar.querySelector('#sbDel').onclick = async () => {
+    const ids = [...CSEL]; if (!ids.length) return;
+    if (!confirm(`למחוק ${ids.length} מוצרים מהקטלוג?\nהם יימחקו גם אצל כל השותפים במאגר. אי אפשר לבטל.`)) return;
+    let n = 0;
+    for (const id of ids) {
+      const it = S.catalog.find(x => x.id === id); if (!it) continue;
+      await delImg(it.img); for (const a of it.angles || []) await delImg(a);
+      S.catalog = S.catalog.filter(x => x !== it); Sync.deleteItem(it); n++;
+    }
+    CSEL.clear(); save(); toast(`נמחקו ${n} מוצרים`, 3000); stay({});
+  };
+}
+// ✏️ עריכה מרובה: ממלאים רק את השדות שרוצים לשנות — השאר נשאר כמו שהוא
+function bulkEditForm(ids) {
+  const F = [['supplier', 'ספק / מותג'], ['model', 'מספר דגם / מק"ט'], ['dims', 'מידות'], ['color', 'צבע וגימור'], ['price', 'מחיר'], ['link', 'קישור'], ['note', 'הערה']];
+  modal(`עריכת ${ids.length} מוצרים`, `<div class="muted">ממלאים רק מה שרוצים לשנות בכל המוצרים שנבחרו. שדה ריק = לא משתנה.</div>
+    ${F.map(([k, l]) => `<label>${l}</label><input data-k="${k}" ${k === 'model' || k === 'link' ? 'dir="ltr"' : ''}>`).join('')}
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="beRev" style="width:auto"> להסיר סימון "⚠️ לבירור"</label>
+    <button class="btn full" id="beGo" style="margin-top:14px">✓ עדכון ${ids.length} מוצרים</button>`, (b, close) => {
+    $('#beGo', b).onclick = () => {
+      const patch = {}; b.querySelectorAll('[data-k]').forEach(i => { if (i.value.trim()) patch[i.dataset.k] = i.value.trim(); });
+      const clr = $('#beRev', b).checked;
+      if (!Object.keys(patch).length && !clr) return toast('לא מולא שום שדה');
+      for (const id of ids) { const it = S.catalog.find(x => x.id === id); if (!it) continue; Object.assign(it, patch); if (clr) { it.review = false; it.reviewWhy = []; } it.updated = Date.now(); it.synced = false; Sync.pushItem(it); }
+      save(); CSEL.clear(); close(); toast(`עודכנו ${ids.length} מוצרים`); go({ selMode: false });
+    };
+  });
 }
 function moveForm(ids) {
   const cats = R().catCats;
@@ -995,9 +1025,9 @@ async function renderCatalog(app) {
   const count = (c) => S.catalog.filter(x => x.cat === c).length;
   app.innerHTML = `
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2>
-      <button class="btn ${V.selMode ? '' : 'sec'} sm" id="selMode">${V.selMode ? '✓ סיום בחירה' : '☑️ בחירה והעברה'}</button>
+      <button class="btn ${V.selMode ? '' : 'sec'} sm" id="selMode">${V.selMode ? '✓ סיום בחירה' : '☑️ בחירה מרובה'}</button>
       ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄</button>` : ''}</div>
-    ${V.selMode ? `<div class="rule" style="margin-bottom:10px"><span class="dot"></span><div>לוחצים על מוצרים כדי לסמן אותם (או "בחר הכל" בקטגוריה שפתוחה), ואז "העבר ל…".</div></div>` : ''}
+    ${V.selMode ? `<div class="rule" style="margin-bottom:10px"><span class="dot"></span><div>לוחצים על מוצרים כדי לסמן אותם (או "בחר הכל"), ואז בוחרים: העברה, עריכה או מחיקה.</div></div>` : ''}
     ${!Sync.ok() ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div><b>הקטלוג לא מחובר למאגר המשותף.</b> מה שמוסיפים כאן נשאר רק בטלפון הזה. מתחברים בהגדרות ← מאגר משותף (עם קוד ההזמנה).</div></div>`
       : S.sync.err ? `<div class="rule red" style="margin-bottom:10px"><span class="dot red"></span><div><b>הסנכרון לא עובד כרגע:</b> ${esc(S.sync.err)}</div></div>`
       : (() => { const u = S.catalog.filter(x => !x.synced).length; return u ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div>⚠️ ${u} מוצרים עוד לא עלו למאגר המשותף. <button class="btn sm" id="syncNow3">🔄 להעלות עכשיו</button></div></div>` : ''; })()}
