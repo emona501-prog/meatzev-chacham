@@ -95,6 +95,9 @@ const P = {
 
 function ensurePlan(p) {
   if (!p.plan) p.plan = { walls: [], openings: [], height: 280, bg: null, original: null };
+  // ניקוי קירות פגומים (בלי קואורדינטות) שנוצרו בתקלה בגרסה 0.9.4
+  const okW = (w) => [w.x1, w.y1, w.x2, w.y2].every(Number.isFinite);
+  if (p.plan.walls.some(w => !okW(w))) { p.plan.walls = p.plan.walls.filter(okW); const ids = new Set(p.plan.walls.map(w => w.id)); p.plan.openings = (p.plan.openings || []).filter(o => ids.has(o.wallId)); }
   if (!p.plan.furniture) p.plan.furniture = [];
   return p.plan;
 }
@@ -243,6 +246,7 @@ const DEFS = `<defs>
 
 function draw() {
   if (!P.svg) return;
+  const eh = document.getElementById('emptyHint'); if (eh && (P.plan.walls.length || P.chain || P.tool === 'wall')) eh.remove();
   const pl = cur(), s = P.view.s;
   const bg = P.plan.bg && P.bgImgEl ? `<image href="${P.bgImgEl}" x="${P.plan.bg.x || 0}" y="${P.plan.bg.y || 0}" width="${P.plan.bg.w * P.plan.bg.scale}" height="${P.plan.bg.h * P.plan.bg.scale}" opacity="${P.plan.bg.opacity ?? 0.5}" preserveAspectRatio="none"/>` : '';
   // רשת
@@ -283,7 +287,7 @@ function draw() {
 
 // ---------------- מסך העורך ----------------
 function open(app, p) {
-  if (P.p !== p) { P.hist = null; } P.p = p; P.plan = ensurePlan(p); if (!P.hist) { P.hist = [snap()]; P.hi = 0; } P.sel = null; P.chain = null; P.cursor = null; P.calib = null;
+  if (P.p !== p) { P.hist = null; } P.p = p; P.plan = ensurePlan(p); if (!P.hist) { P.hist = [histSnap()]; P.hi = 0; } P.sel = null; P.chain = null; P.cursor = null; P.calib = null;
   P.wallType = P.wallType || 'interior';
   setHeader('📐 ' + p.name, true);
   app.innerHTML = `
@@ -301,6 +305,8 @@ function open(app, p) {
       <svg id="psvg" width="100%" height="100%" style="display:block;touch-action:none;user-select:none"></svg>
       <div style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:6px">
         <button class="btn sec sm" id="zin">＋</button><button class="btn sec sm" id="zout">－</button><button class="btn sec sm" id="zfit">⤢</button></div>
+      ${!P.plan.walls.length && !P.plan.bg ? `<div id="emptyHint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:80%;text-align:center;background:rgba(255,255,255,.93);border:1px dashed var(--accent);border-radius:14px;padding:14px;pointer-events:none;color:var(--ink);font-size:14px;line-height:1.5">
+        <b>התוכנית ריקה</b><br>כל משבצת = 50 ס"מ<br><br>✏️ לשרטט: בוחרים <b>🧱 קיר</b>, נוגעים בנקודה אחת ואז בנקודה הבאה — הקירות נמשכים זה מזה. "✓ סיום קו" כשמסיימים.<br><br>📷 או: <b>🤖 זיהוי תוכנית מתמונה</b> (למטה) — והבית נבנה לבד.<br><br>⤢ מציג את כל התוכנית.</div>` : ''}
       <div id="fbar" style="position:absolute;bottom:8px;left:8px;right:8px;display:none;gap:5px;flex-wrap:wrap;justify-content:center;background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:12px;padding:6px"></div>
       <div id="chainBar" style="position:absolute;bottom:8px;right:8px;display:none"><button class="btn sm" id="endChain">✓ סיום קו</button></div>
       ${P.plan.original ? `<div style="position:absolute;top:8px;right:8px"><button class="btn ${P.showOriginal ? '' : 'sec'} sm" id="baBtn">${P.showOriginal ? '👁 מצב קיים (לפני)' : '✏️ אחרי (תכנון)'}</button></div>` : ''}
@@ -348,10 +354,10 @@ function rerender() { open($('#app'), P.p); }
 window.__plan = { P, clearances: (f) => clearances(f, cur()) }; // לבדיקות
 // ---- היסטוריה: ביטול / חזרה ללא הגבלה (לכל משך העבודה על התוכנית) ----
 const HKEYS = ['walls', 'openings', 'furniture', 'bg', 'original', 'mat', 'height'];
-function snap() { const o = {}; for (const k of HKEYS) o[k] = P.plan[k] === undefined ? undefined : JSON.parse(JSON.stringify(P.plan[k])); return JSON.stringify(o); }
+function histSnap() { const o = {}; for (const k of HKEYS) o[k] = P.plan[k] === undefined ? undefined : JSON.parse(JSON.stringify(P.plan[k])); return JSON.stringify(o); }
 function changed() {
   P.p.updated = Date.now(); save();
-  if (!P.hist) return; const sn = snap(); if (sn === P.hist[P.hi]) return;
+  if (!P.hist) return; const sn = histSnap(); if (sn === P.hist[P.hi]) return;
   P.hist.length = P.hi + 1; P.hist.push(sn); P.hi = P.hist.length - 1; histBtns();
 }
 function histBtns() { const u = $('#hUndo'), r = $('#hRedo'); if (u) u.disabled = !(P.hi > 0); if (r) r.disabled = !(P.hi < P.hist.length - 1); }
@@ -369,7 +375,7 @@ function clearMenu() {
     <button class="btn sec full" id="cPage">📄 נקה דף — קירות, פתחים ורהיטים (הסרטוט ברקע נשאר)</button><div style="height:8px"></div>
     <button class="btn danger full" id="cAll">🗑️ נקה פרויקט — הכל, כולל סרטוט הרקע ומצב "לפני"</button>
     <div class="muted" style="margin-top:10px">כל ניקוי אפשר לבטל בכפתור ↶ ביטול.</div>`, (b, close) => {
-    const done = (msg) => { P.sel = null; changed(); close(); rerender(); toast(msg + ' · אפשר לבטל ב-↶'); };
+    const done = (msg) => { P.sel = null; changed(); close(); P.fitted = null; rerender(); toast(msg + ' · אפשר לבטל ב-↶'); };
     b.querySelector('#cSel').onclick = () => {
       const k = P.sel?.kind, id = P.sel?.id;
       if (k === 'furn') P.plan.furniture = P.plan.furniture.filter(x => x.id !== id);
