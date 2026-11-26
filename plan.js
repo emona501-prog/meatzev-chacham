@@ -256,13 +256,32 @@ function draw() {
       <text x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 - 18 / s}" font-size="${15 / s}" text-anchor="middle" fill="#a86b4a" stroke="#fff" stroke-width="${4 / s}" paint-order="stroke" font-weight="700">${fmt(L)} ס"מ</text>`;
   }
   if (P.cursor && (P.tool === 'wall' || P.tool === 'calib')) extra += `<circle cx="${P.cursor.x}" cy="${P.cursor.y}" r="${6 / s}" fill="${P.cursor.snapped ? '#2e8b57' : '#a86b4a'}"/>`;
+  const sf = selFurn();
+  if (sf) { // ידית סיבוב + מסגרת + מרחקים לקירות בזמן גרירה
+    const a = (sf.rot || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a), hd = sf.d / 2 + 34 / s;
+    const hx = sf.x + hd * sa, hy = sf.y - hd * ca, ex = sf.x + (sf.d / 2) * sa, ey = sf.y - (sf.d / 2) * ca;
+    extra += `<line x1="${ex}" y1="${ey}" x2="${hx}" y2="${hy}" stroke="#a86b4a" stroke-width="${2 / s}" stroke-dasharray="${4 / s} ${3 / s}"/>
+      <circle cx="${hx}" cy="${hy}" r="${13 / s}" fill="#a86b4a" stroke="#fff" stroke-width="${2 / s}"/>
+      <text x="${hx}" y="${hy}" font-size="${14 / s}" text-anchor="middle" dominant-baseline="central" fill="#fff">⟳</text>`;
+    if (P.gesture?.type === 'rot') extra += `<text x="${sf.x}" y="${sf.y}" font-size="${18 / s}" text-anchor="middle" dominant-baseline="central" fill="#a86b4a" stroke="#fff" stroke-width="${4 / s}" paint-order="stroke" font-weight="700">${Math.round(sf.rot || 0)}°</text>`;
+    if (P.gesture?.type === 'drag' || P.gesture?.type === 'rot' || P.nudging) {
+      const cl = clearances(sf, pl);
+      for (const [k, dx, dy, half] of [['front', 0, 1, sf.d / 2], ['back', 0, -1, sf.d / 2], ['left', -1, 0, sf.w / 2], ['right', 1, 0, sf.w / 2]]) {
+        const v = cl[k]; if (!(v < 600)) continue;
+        const ox = sf.x + (dx * half) * ca - (dy * half) * sa, oy = sf.y + (dx * half) * sa + (dy * half) * ca;
+        const vx = dx * ca - dy * sa, vy = dx * sa + dy * ca, tx = ox + vx * v, ty = oy + vy * v;
+        extra += `<line x1="${ox}" y1="${oy}" x2="${tx}" y2="${ty}" stroke="#2e7dd7" stroke-width="${1.5 / s}" stroke-dasharray="${3 / s} ${2 / s}"/>
+          <text x="${(ox + tx) / 2}" y="${(oy + ty) / 2}" font-size="${12 / s}" text-anchor="middle" dominant-baseline="central" fill="#2e7dd7" stroke="#fff" stroke-width="${3 / s}" paint-order="stroke" font-weight="700">${Math.round(v)}</text>`;
+      }
+    }
+  }
   if (P.calib?.a) extra += `<circle cx="${P.calib.a.x}" cy="${P.calib.a.y}" r="${6 / s}" fill="#c0392b"/>` + (P.cursor ? `<line x1="${P.calib.a.x}" y1="${P.calib.a.y}" x2="${P.cursor.x}" y2="${P.cursor.y}" stroke="#c0392b" stroke-width="${2 / s}"/>` : '');
   P.svg.innerHTML = DEFS + `<g transform="translate(${P.view.tx},${P.view.ty}) scale(${s})">${grid}${bg}${planSVG(pl, { diff: !P.showOriginal && P.plan.original && P.diffOn })}${extra}</g>`;
 }
 
 // ---------------- מסך העורך ----------------
 function open(app, p) {
-  P.p = p; P.plan = ensurePlan(p); P.sel = null; P.chain = null; P.cursor = null; P.calib = null;
+  if (P.p !== p) { P.hist = null; } P.p = p; P.plan = ensurePlan(p); if (!P.hist) { P.hist = [snap()]; P.hi = 0; } P.sel = null; P.chain = null; P.cursor = null; P.calib = null;
   P.wallType = P.wallType || 'interior';
   setHeader('📐 ' + p.name, true);
   app.innerHTML = `
@@ -271,6 +290,7 @@ function open(app, p) {
         <span class="chip" data-t="select">👆 בחירה</span><span class="chip" data-t="pan">✋ הזזה</span>
         <span class="chip" data-t="wall">🧱 קיר</span><span class="chip" data-t="door">🚪 דלת</span><span class="chip" data-t="window">🪟 חלון</span><span class="chip" data-t="furn">🛋️ ריהוט</span>
       </div>
+      <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sec sm" id="hUndo" style="flex:1">↶ ביטול</button><button class="btn sec sm" id="hRedo" style="flex:1">↷ חזרה</button><button class="btn sec sm" id="hClear" style="flex:1">🧹 ניקוי</button></div>
       <div class="row" style="margin-top:8px"><span class="muted">סוג קיר חדש:</span>
         <select id="wtSel" class="grow" style="padding:7px 10px;flex:1">${Object.entries(WALL_TYPES).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('')}</select></div>
       <div id="hint" class="muted" style="margin-top:6px;min-height:3.9em;line-height:1.3"></div>
@@ -279,6 +299,7 @@ function open(app, p) {
       <svg id="psvg" width="100%" height="100%" style="display:block;touch-action:none;user-select:none"></svg>
       <div style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:6px">
         <button class="btn sec sm" id="zin">＋</button><button class="btn sec sm" id="zout">－</button><button class="btn sec sm" id="zfit">⤢</button></div>
+      <div id="fbar" style="position:absolute;bottom:8px;left:8px;right:8px;display:none;gap:5px;flex-wrap:wrap;justify-content:center;background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:12px;padding:6px"></div>
       <div id="chainBar" style="position:absolute;bottom:8px;right:8px;display:none"><button class="btn sm" id="endChain">✓ סיום קו</button></div>
       ${P.plan.original ? `<div style="position:absolute;top:8px;right:8px"><button class="btn ${P.showOriginal ? '' : 'sec'} sm" id="baBtn">${P.showOriginal ? '👁 מצב קיים (לפני)' : '✏️ אחרי (תכנון)'}</button></div>` : ''}
     </div>
@@ -298,6 +319,7 @@ function open(app, p) {
     </div>`;
   P.svg = $('#psvg');
   bindTools(); bindPointer(); renderProps();
+  $('#hUndo').onclick = () => histGo(-1); $('#hRedo').onclick = () => histGo(1); $('#hClear').onclick = clearMenu; histBtns();
   if (P.plan.bg) getImg(P.plan.bg.img).then(src => { P.bgImgEl = src; draw(); }); else P.bgImgEl = null;
   if (!P.fitted) { fit(); P.fitted = p.id; } else if (P.fitted !== p.id) { fit(); P.fitted = p.id; }
   setTool(P.tool); draw();
@@ -319,7 +341,43 @@ function open(app, p) {
   if ($('#bBgDel')) $('#bBgDel').onclick = async () => { if (!confirm('להסיר את סרטוט הרקע?')) return; await delImg(P.plan.bg.img); P.plan.bg = null; P.bgImgEl = null; changed(); rerender(); };
 }
 function rerender() { open($('#app'), P.p); }
-function changed() { P.p.updated = Date.now(); save(); }
+window.__plan = { P, clearances: (f) => clearances(f, cur()) }; // לבדיקות
+// ---- היסטוריה: ביטול / חזרה ללא הגבלה (לכל משך העבודה על התוכנית) ----
+const HKEYS = ['walls', 'openings', 'furniture', 'bg', 'original', 'mat', 'height'];
+function snap() { const o = {}; for (const k of HKEYS) o[k] = P.plan[k] === undefined ? undefined : JSON.parse(JSON.stringify(P.plan[k])); return JSON.stringify(o); }
+function changed() {
+  P.p.updated = Date.now(); save();
+  if (!P.hist) return; const sn = snap(); if (sn === P.hist[P.hi]) return;
+  P.hist.length = P.hi + 1; P.hist.push(sn); P.hi = P.hist.length - 1; histBtns();
+}
+function histBtns() { const u = $('#hUndo'), r = $('#hRedo'); if (u) u.disabled = !(P.hi > 0); if (r) r.disabled = !(P.hi < P.hist.length - 1); }
+function histGo(d) {
+  const ni = P.hi + d; if (!P.hist || ni < 0 || ni >= P.hist.length) return;
+  P.hi = ni; const o = JSON.parse(P.hist[ni]); for (const k of HKEYS) { if (o[k] === undefined) delete P.plan[k]; else P.plan[k] = o[k]; }
+  P.sel = null; P.chain = null; P.cursor = null; P.p.updated = Date.now(); save();
+  rerender();
+}
+function clearMenu() {
+  const hasSel = !!P.sel && !P.showOriginal;
+  modal('🧹 ניקוי', `
+    <button class="btn sec full" id="cSel" ${hasSel ? '' : 'disabled'}>✖ נקה בחירה — מוחק רק את מה שמסומן עכשיו</button><div style="height:8px"></div>
+    <button class="btn sec full" id="cFurn">🛋️ נקה ריהוט — כל הרהיטים בתוכנית</button><div style="height:8px"></div>
+    <button class="btn sec full" id="cPage">📄 נקה דף — קירות, פתחים ורהיטים (הסרטוט ברקע נשאר)</button><div style="height:8px"></div>
+    <button class="btn danger full" id="cAll">🗑️ נקה פרויקט — הכל, כולל סרטוט הרקע ומצב "לפני"</button>
+    <div class="muted" style="margin-top:10px">כל ניקוי אפשר לבטל בכפתור ↶ ביטול.</div>`, (b, close) => {
+    const done = (msg) => { P.sel = null; changed(); close(); rerender(); toast(msg + ' · אפשר לבטל ב-↶'); };
+    b.querySelector('#cSel').onclick = () => {
+      const k = P.sel?.kind, id = P.sel?.id;
+      if (k === 'furn') P.plan.furniture = P.plan.furniture.filter(x => x.id !== id);
+      else if (k === 'opening') P.plan.openings = P.plan.openings.filter(x => x.id !== id);
+      else if (k === 'wall') { const w = P.plan.walls.find(x => x.id === id); if (w?.type === 'mamad' && !confirm('זה קיר ממ"ד — למחוק מהסקיצה בכל זאת?')) return; P.plan.walls = P.plan.walls.filter(x => x.id !== id); P.plan.openings = P.plan.openings.filter(o => o.wallId !== id); }
+      done('נמחק');
+    };
+    b.querySelector('#cFurn').onclick = () => { if (!confirm('למחוק את כל הרהיטים?')) return; P.plan.furniture = []; done('הרהיטים נמחקו'); };
+    b.querySelector('#cPage').onclick = () => { if (!confirm('לנקות את כל הקירות, הפתחים והרהיטים?')) return; P.plan.walls = []; P.plan.openings = []; P.plan.furniture = []; done('הדף נוקה'); };
+    b.querySelector('#cAll').onclick = () => { if (!confirm('לנקות את כל התוכנית, כולל סרטוט הרקע ומצב "לפני"?')) return; Object.assign(P.plan, { walls: [], openings: [], furniture: [], bg: null, original: null }); P.showOriginal = false; P.bgImgEl = null; done('התוכנית נוקתה'); };
+  });
+}
 
 function setTool(t) {
   if (P.showOriginal && ['wall', 'door', 'window', 'furn'].includes(t)) { toast('במצב "לפני" אי אפשר לערוך. עוברים ל"אחרי".'); t = 'select'; }
@@ -327,9 +385,9 @@ function setTool(t) {
   if (t === 'furn' && !P.furnType) setTimeout(furnPicker, 50);
   document.querySelectorAll('#tools .chip').forEach(c => c.classList.toggle('on', c.dataset.t === t));
   $('#wtSel').value = P.wallType;
-  $('#chainBar').style.display = 'none';
+  $('#chainBar').style.display = 'none'; renderFBar();
   const hints = {
-    select: 'לוחצים על קיר או פתח כדי לערוך. גרירה באצבע אחת מזיזה את התוכנית, שתי אצבעות לזום.',
+    select: 'לוחצים על קיר, פתח או רהיט כדי לערוך. רהיט גוררים באצבע, ⟳ מסובב. גרירה על רקע ריק מזיזה את התוכנית, שתי אצבעות לזום.',
     pan: 'גרירה מזיזה את התוכנית. שתי אצבעות לזום.',
     wall: 'נוגעים בנקודת ההתחלה, ואז בנקודת הסוף (אפשר לגרור כדי לכוון). הקיר הבא ממשיך מאותה נקודה. מידות נצמדות ל-5 ס"מ.',
     door: 'נוגעים על קיר כדי להוסיף דלת (90 ס"מ).',
@@ -374,7 +432,11 @@ function bindPointer() {
     const pt = toWorld(e.clientX, e.clientY);
     const drawing = ['wall', 'calib'].includes(P.tool);
     P.gesture = { type: drawing ? 'draw' : 'tap', sx: e.clientX, sy: e.clientY, view: { ...P.view }, moved: false };
-    if (P.tool === 'select' && !P.showOriginal) { const f = hitFurn(pt); if (f && P.sel?.kind === 'furn' && P.sel.id === f.id) Object.assign(P.gesture, { type: 'drag', f, ox: f.x - pt.x, oy: f.y - pt.y }); }
+    if (P.tool === 'select' && !P.showOriginal) {
+      const rf = hitRotHandle(pt);
+      if (rf) Object.assign(P.gesture, { type: 'rot', f: rf });
+      else { const f = hitFurn(pt); if (f) { const was = P.sel?.kind === 'furn' && P.sel.id === f.id; P.sel = { kind: 'furn', id: f.id }; if (!was) { draw(); renderProps(); } Object.assign(P.gesture, { type: 'drag', f, ox: f.x - pt.x, oy: f.y - pt.y }); } }
+    }
     if (drawing) { P.cursor = snap(pt, P.tool === 'wall' ? P.chain : P.calib?.a); draw(); }
   });
   el.addEventListener('pointermove', e => {
@@ -393,7 +455,12 @@ function bindPointer() {
     }
     if (Math.hypot(e.clientX - g.sx, e.clientY - g.sy) > 6) g.moved = true;
     if (g.type === 'draw') { P.cursor = snap(toWorld(e.clientX, e.clientY), P.tool === 'wall' ? P.chain : P.calib?.a); draw(); }
-    else if (g.type === 'drag') { if (g.moved) { const w = toWorld(e.clientX, e.clientY); g.f.x = Math.round((w.x + g.ox) / 5) * 5; g.f.y = Math.round((w.y + g.oy) / 5) * 5; draw(); } }
+    else if (g.type === 'drag') { if (g.moved) { const w = toWorld(e.clientX, e.clientY), st = P.view.s > 1.2 ? 1 : P.view.s > 0.5 ? 2 : 5; g.f.x = Math.round((w.x + g.ox) / st) * st; g.f.y = Math.round((w.y + g.oy) / st) * st; draw(); } }
+    else if (g.type === 'rot') {
+      const w = toWorld(e.clientX, e.clientY); let ang = Math.atan2(w.x - g.f.x, -(w.y - g.f.y)) * 180 / Math.PI; ang = (ang + 360) % 360;
+      ang = Math.round(ang / 5) * 5; const near = Math.round(ang / 90) * 90; if (Math.abs(ang - near) <= 5) ang = near % 360; // "מגנט" לישר
+      g.f.rot = ang; g.moved = true; draw();
+    }
     else if (g.moved) { P.view.tx = g.view.tx + e.clientX - g.sx; P.view.ty = g.view.ty + e.clientY - g.sy; draw(); }
   });
   const up = e => {
@@ -403,7 +470,7 @@ function bindPointer() {
     if (g?.type === 'pinch') { if (P.pointers.size === 0) P.gesture = null; return; }
     P.gesture = null; if (!g) return;
     if (g.type === 'draw' && P.cursor) return commitPoint(P.cursor);
-    if (g.type === 'drag') { if (g.moved) { changed(); renderProps(); } else onTap(toWorld(e.clientX, e.clientY)); return; }
+    if (g.type === 'drag' || g.type === 'rot') { if (g.moved) { changed(); draw(); renderProps(); } else if (g.type === 'drag') { draw(); renderProps(); } return; }
     if (g.type === 'tap' && !g.moved) onTap(toWorld(e.clientX, e.clientY));
   };
   el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
@@ -425,6 +492,26 @@ function commitPoint(pt) {
   P.chain = { x: pt.x, y: pt.y }; P.cursor = null; changed(); draw(); renderProps();
 }
 
+function selFurn() { if (P.sel?.kind !== 'furn' || P.showOriginal || P.tool !== 'select') return null; return (cur().furniture || []).find(x => x.id === P.sel.id) || null; }
+function hitRotHandle(pt) {
+  const f = selFurn(); if (!f) return null; const s = P.view.s, a = (f.rot || 0) * Math.PI / 180, hd = f.d / 2 + 34 / s;
+  return Math.hypot(pt.x - (f.x + hd * Math.sin(a)), pt.y - (f.y - hd * Math.cos(a))) < 22 / s ? f : null;
+}
+// הצמדה לקיר הקרוב: מסובב כך שהגב מול הקיר ומצמיד (אפשר להשאיר מרווח)
+function snapToWall(f, gap = 0) {
+  const pl = cur(); let best = null;
+  for (const w of pl.walls) {
+    const ex = w.x2 - w.x1, ey = w.y2 - w.y1, L = Math.hypot(ex, ey); if (L < 1) continue;
+    const t = Math.max(0, Math.min(L, ((f.x - w.x1) * ex + (f.y - w.y1) * ey) / L)), fx = w.x1 + ex / L * t, fy = w.y1 + ey / L * t, d = Math.hypot(f.x - fx, f.y - fy);
+    if (!best || d < best.d) best = { w, d, t, L, ux: ex / L, uy: ey / L };
+  }
+  if (!best) return false;
+  let nx = -best.uy, ny = best.ux; if ((f.x - best.w.x1) * nx + (f.y - best.w.y1) * ny < 0) { nx = -nx; ny = -ny; }
+  f.rot = Math.round((Math.atan2(-nx, ny) * 180 / Math.PI + 360) % 360);
+  const t = Math.max(f.w / 2, Math.min(best.L - f.w / 2, best.t)), off = best.w.thick / 2 + f.d / 2 + gap;
+  f.x = Math.round(best.w.x1 + best.ux * t + nx * off); f.y = Math.round(best.w.y1 + best.uy * t + ny * off);
+  return true;
+}
 function hitFurn(pt) {
   const list = cur().furniture || [];
   for (let i = list.length - 1; i >= 0; i--) {
@@ -466,7 +553,26 @@ function onTap(pt) {
 }
 
 // ---------------- פאנל מאפיינים ----------------
+function renderFBar() {
+  const bar = $('#fbar'); if (!bar) return; const f = selFurn();
+  if (!f) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = `<button class="btn sec sm" data-n="0,-1">▲</button><button class="btn sec sm" data-n="0,1">▼</button><button class="btn sec sm" data-n="1,0">▶</button><button class="btn sec sm" data-n="-1,0">◀</button>
+    <button class="btn sec sm" data-r="-15">⟲15°</button><button class="btn sec sm" data-r="15">⟳15°</button><button class="btn sec sm" data-r="90">⟳90°</button><button class="btn sec sm" id="fwall">⇥ לקיר</button><button class="btn sm" id="fok">✓</button>`;
+  const done = () => { P.nudging = false; changed(); draw(); renderProps(); };
+  bar.querySelectorAll('[data-n]').forEach(b => {
+    const [dx, dy] = b.dataset.n.split(',').map(Number); let t = null, n = 0;
+    const step = () => { const k = n++ > 8 ? 5 : 1; f.x += dx * k; f.y += dy * k; P.nudging = true; draw(); };
+    b.onpointerdown = (e) => { e.preventDefault(); n = 0; step(); t = setInterval(step, 120); };
+    const stop = () => { if (t) { clearInterval(t); t = null; done(); } };
+    b.onpointerup = stop; b.onpointerleave = stop; b.onpointercancel = stop;
+  });
+  bar.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { f.rot = (((f.rot || 0) + +b.dataset.r) % 360 + 360) % 360; done(); });
+  $('#fwall', bar).onclick = () => { if (snapToWall(f)) { done(); toast('הוצמד לקיר הקרוב (גב לקיר)'); } };
+  $('#fok', bar).onclick = () => { P.sel = null; P.nudging = false; draw(); renderProps(); };
+}
 function renderProps() {
+  renderFBar();
   const box = $('#props'); if (!box) return;
   const pl = cur(), ro = P.showOriginal;
   if (!P.sel) { box.innerHTML = ''; return; }
@@ -483,19 +589,26 @@ function renderProps() {
         else for (const [i, v] of sides.entries()) if (v < 60) issues.push(`${i ? 'ימין' : 'שמאל'}: ${sideTxt(v)} — מינימום 60`);
       }
     }
+    const ed = (k, v) => v === Infinity ? `<div><label>${k[1]}</label><input disabled value="אין קיר"></div>` : `<div><label>${k[1]}</label><input type="number" inputmode="numeric" data-cl="${k[0]}" value="${Math.round(v)}" ${ro ? 'disabled' : ''}></div>`;
     box.innerHTML = `<div class="card"><h3>🛋️ ${def.name}</h3>
       <div class="grid2"><div><label>רוחב (ס"מ)</label><input id="fw" type="number" inputmode="numeric" value="${f.w}" ${ro ? 'disabled' : ''}></div>
         <div><label>עומק (ס"מ)</label><input id="fd" type="number" inputmode="numeric" value="${f.d}" ${ro ? 'disabled' : ''}></div></div>
-      <div class="muted" style="margin-top:8px">מרחק לקירות: חזית ${sideTxt(cl.front)} · אחור ${sideTxt(cl.back)} · ימין ${sideTxt(cl.right)} · שמאל ${sideTxt(cl.left)}</div>
+      <label>📏 מרחק מהקירות (ס"מ) — אפשר להקליד מספר מדויק</label>
+      <div class="grid2">${ed(['front', 'חזית'], cl.front)}${ed(['back', 'גב'], cl.back)}${ed(['right', 'ימין'], cl.right)}${ed(['left', 'שמאל'], cl.left)}</div>
+      <div class="grid2" style="margin-top:6px"><div><label>זווית (°)</label><input id="frotv" type="number" inputmode="numeric" value="${Math.round(f.rot || 0)}" ${ro ? 'disabled' : ''}></div><div></div></div>
       ${issues.length ? `<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div><b>מרווח קטן מהמומלץ</b><br>${issues.map(esc).join('<br>')}<br><span class="muted">${esc(rule.msg)}</span></div></div>` : rule ? `<div class="rule green" style="margin-top:8px"><span class="dot green"></span><div>המרווחים תקינים ✓</div></div>` : ''}
-      ${ro ? '' : `<div class="grid2" style="margin-top:10px"><button class="btn sec" id="frot">⟳ סיבוב 90°</button><button class="btn sec" id="fdup">⧉ שכפול</button></div>
-      <div style="height:8px"></div><button class="btn danger full" id="fdel">מחיקה</button>
-      <div class="muted" style="margin-top:6px">להזזה: גוררים את הפריט המסומן באצבע.</div>`}</div>`;
+      ${ro ? '' : `<div class="grid2" style="margin-top:10px"><button class="btn sec" id="fdup">⧉ שכפול</button><button class="btn danger" id="fdel">מחיקה</button></div>
+      <div class="muted" style="margin-top:6px">גוררים את הפריט באצבע · העיגול ⟳ מסובב בכל זווית · החצים בתחתית התוכנית מזיזים בס"מ אחד</div>`}</div>`;
     if (ro) return;
-    const upd = () => { changed(); draw(); renderProps(); };
+    const upd = () => { changed(); draw(); setTimeout(renderProps, 0); };
     $('#fw').onchange = e => { const v = +e.target.value; if (v > 0) { f.w = v; upd(); } };
     $('#fd').onchange = e => { const v = +e.target.value; if (v > 0) { f.d = v; upd(); } };
-    $('#frot').onclick = () => { f.rot = ((f.rot || 0) + 90) % 360; upd(); };
+    $('#frotv').onchange = e => { f.rot = ((+e.target.value % 360) + 360) % 360; upd(); };
+    box.querySelectorAll('[data-cl]').forEach(inp => inp.onchange = () => {
+      const k = inp.dataset.cl, want = +inp.value, now = clearances(f, cur())[k]; if (!(want >= 0) || now === Infinity) return;
+      const a = (f.rot || 0) * Math.PI / 180, [dx, dy] = { front: [0, 1], back: [0, -1], left: [-1, 0], right: [1, 0] }[k];
+      const mv = now - want; f.x = Math.round((f.x + (dx * Math.cos(a) - dy * Math.sin(a)) * mv) * 10) / 10; f.y = Math.round((f.y + (dx * Math.sin(a) + dy * Math.cos(a)) * mv) * 10) / 10; upd();
+    });
     $('#fdup').onclick = () => { const n = { ...f, id: 'f' + uid(), x: f.x + 30, y: f.y + 30 }; P.plan.furniture.push(n); P.sel = { kind: 'furn', id: n.id }; upd(); };
     $('#fdel').onclick = () => { P.plan.furniture = P.plan.furniture.filter(x => x !== f); P.sel = null; upd(); };
     return;
@@ -545,7 +658,7 @@ function renderProps() {
       ${issues.map(i => `<div class="rule ${i.level}" style="margin-top:8px"><span class="dot ${i.level}"></span><div>${esc(i.msg)}</div></div>`).join('')}
       ${ro ? '' : '<div style="height:10px"></div><button class="btn danger full" id="odel">מחיקה</button>'}</div>`;
     if (ro) return;
-    const upd = () => { changed(); draw(); renderProps(); };
+    const upd = () => { changed(); draw(); setTimeout(renderProps, 0); };
     $('#ow').onchange = e => { const v = +e.target.value; if (v > 0) { o.width = v; upd(); } };
     $('#oh').onchange = e => { const v = +e.target.value; if (v > 0) { o.height = v; upd(); } };
     $('#op').onchange = e => { const v = +e.target.value; if (v >= 0) { o.pos = v + o.width / 2; upd(); } };
