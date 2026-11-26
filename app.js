@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.9.1';
+const APP_VERSION = '0.9.2';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -444,7 +444,7 @@ function flipbook(list, start = 0, projectId = '') {
   if (!list.length) return toast('אין מוצרים להצגה');
   let i = Math.max(0, Math.min(start, list.length - 1)), busy = false;
   const ov = document.createElement('div'); ov.id = 'fbook';
-  ov.innerHTML = `<div class="fb-top"><button class="fb-x" id="fbX">✕</button><span id="fbN"></span><button class="fb-x" id="fbZ">🔍</button></div>
+  ov.innerHTML = `<div class="fb-top"><button class="fb-x" id="fbX">✕</button><span id="fbN"></span><span style="display:flex;gap:8px"><button class="fb-x" id="fbRev" title="הפיכת כיוון הדפדוף">⇄</button><button class="fb-x" id="fbZ">🔍</button></span></div>
     <div class="fb-stage" id="fbStage"></div>
     <div class="fb-bot"><button class="btn sec" id="fbPrev">‹ הקודם</button><button class="btn" id="fbPick"></button><button class="btn sec" id="fbNext">הבא ›</button></div>`;
   document.body.appendChild(ov); document.body.style.overflow = 'hidden';
@@ -472,12 +472,43 @@ function flipbook(list, start = 0, projectId = '') {
     ov.querySelector('#fbPrev').disabled = i === 0; ov.querySelector('#fbNext').disabled = i === list.length - 1;
   };
   let cur = page(list[i]); stage.appendChild(cur); refresh();
-  const turn = (dir) => {
-    if (busy) return; const ni = i + dir; if (ni < 0 || ni >= list.length) return;
-    busy = true; const nxt = page(list[ni]); nxt.classList.add('under'); stage.insertBefore(nxt, cur);
-    cur.classList.add(dir > 0 ? 'turn-next' : 'turn-prev');
-    setTimeout(() => { cur.remove(); nxt.classList.remove('under'); cur = nxt; i = ni; refresh(); busy = false; }, 560);
+  // כיוון: בספר בעברית "הבא" = מרימים את הצד השמאלי של הדף ומעבירים ימינה (אפשר להפוך בכפתור ⇄)
+  const rev = () => !!S.settings.fbRev;
+  const sideNext = () => rev() ? -1 : 1;           // 1 = גרירה ימינה מדפדפת קדימה
+  let drag = null;
+  const shade = (el, k) => { let sh = el.querySelector('.fb-shade'); if (!sh) { sh = document.createElement('div'); sh.className = 'fb-shade'; el.appendChild(sh); } sh.style.opacity = (0.55 * Math.sin(Math.min(1, k) * Math.PI / 2)).toFixed(3); };
+  const setAngle = (el, dirSign, k) => { // dirSign: 1 = הדף עף ימינה, -1 = שמאלה; k: 0..1
+    el.style.transition = 'none'; el.style.transformOrigin = dirSign > 0 ? 'right center' : 'left center';
+    el.style.transform = `rotateY(${(dirSign > 0 ? 1 : -1) * 170 * k}deg)`; shade(el, k);
   };
+  const finish = async (dirSign, k, go) => {
+    const el = cur; el.style.transition = 'transform .45s cubic-bezier(.3,.1,.25,1)';
+    el.style.transform = `rotateY(${go ? (dirSign > 0 ? 1 : -1) * 170 : 0}deg)`; shade(el, go ? 1 : 0);
+    await new Promise(r => setTimeout(r, 460));
+    if (go) { el.remove(); const n = stage.querySelector('.fb-page.under'); n.classList.remove('under'); cur = n; refresh(); }
+    else { stage.querySelectorAll('.fb-page.under').forEach(x => x.remove()); el.style.transform = ''; el.querySelector('.fb-shade')?.remove(); }
+    busy = false;
+  };
+  const prepUnder = (ni) => { stage.querySelectorAll('.fb-page.under').forEach(x => x.remove()); const n = page(list[ni]); n.classList.add('under'); stage.insertBefore(n, cur); };
+  const turn = (step) => { // step: 1 = הבא, -1 = הקודם (מהכפתורים)
+    if (busy) return; const ni = i + step; if (ni < 0 || ni >= list.length) return;
+    busy = true; prepUnder(ni); i = ni; const dirSign = step * sideNext();
+    setAngle(cur, dirSign, 0); requestAnimationFrame(() => finish(dirSign, 1, true));
+  };
+  stage.addEventListener('pointerdown', e => {
+    if (busy || !e.isPrimary) return;
+    const it = list[i]; if (it.angles?.length && e.target.closest('.fb-img')) return; // על מוצר עם זוויות — הגרירה מסובבת אותו
+    drag = { x: e.clientX, dir: 0, ni: null, k: 0 }; stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!drag) return; const dx = e.clientX - drag.x;
+    if (!drag.dir) { if (Math.abs(dx) < 12) return; const dirSign = dx > 0 ? 1 : -1, step = dirSign * sideNext(), ni = i + step;
+      if (ni < 0 || ni >= list.length) { drag = null; return; } drag.dir = dirSign; drag.step = step; drag.ni = ni; busy = true; prepUnder(ni); }
+    drag.k = Math.max(0, Math.min(1, (dx * drag.dir) / (stage.clientWidth * 0.9))); setAngle(cur, drag.dir, drag.k);
+  });
+  const endDrag = () => { if (!drag) return; const d = drag; drag = null; if (!d.dir) return; const go = d.k > 0.3; if (go) i = d.ni; finish(d.dir, d.k, go); };
+  stage.addEventListener('pointerup', endDrag); stage.addEventListener('pointercancel', endDrag);
+  ov.querySelector('#fbRev').onclick = () => { S.settings.fbRev = !S.settings.fbRev; save(); toast(S.settings.fbRev ? 'כיוון הדפדוף הופך: גרירה שמאלה = הבא' : 'כיוון רגיל: גרירה ימינה = הבא'); };
   ov.querySelector('#fbNext').onclick = () => turn(1);
   ov.querySelector('#fbPrev').onclick = () => turn(-1);
   ov.querySelector('#fbZ').onclick = () => { const im = cur.querySelector('img'); if (im?.src) zoomView(im.src); };
@@ -491,10 +522,6 @@ function flipbook(list, start = 0, projectId = '') {
       b.querySelectorAll('[data-p]').forEach(el => el.onclick = () => { addTo(S.projects.find(p => p.id === el.dataset.p)); close(); });
     });
   };
-  // החלקה באצבע לדפדוף
-  let sx = null;
-  stage.addEventListener('touchstart', e => { if (e.touches.length === 1) sx = e.touches[0].clientX; }, { passive: true });
-  stage.addEventListener('touchend', e => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 60 && !e.target.closest('.fb-img')) turn(dx > 0 ? 1 : -1); });
 }
 // 🔍 הגדלה: צביטה / גלגלת / לחיצה כפולה, וגרירה
 function zoomView(src) {
