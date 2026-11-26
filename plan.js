@@ -529,6 +529,24 @@ function hitWallEnd(pt) { const w = selWall(); if (!w) return null; const r = 22
 function linkedEnds(w, end) { const x = w['x' + end], y = w['y' + end], out = []; for (const o of P.plan.walls) if (o !== w) for (const e of [1, 2]) if (Math.abs(o['x' + e] - x) < 1 && Math.abs(o['y' + e] - y) < 1) out.push([o, e]); return out; }
 function clampOpenings(w) { const L = len(w); for (const o of P.plan.openings) if (o.wallId === w.id) { o.width = Math.min(o.width, Math.max(30, L - 10)); o.pos = Math.max(o.width / 2, Math.min(L - o.width / 2, o.pos)); } }
 function moveWallBy(w, dx, dy, links) { w.x1 += dx; w.y1 += dy; w.x2 += dx; w.y2 += dy; for (const [o, e] of links) { o['x' + e] += dx; o['y' + e] += dy; clampOpenings(o); } }
+// ⧉ העתקת קיר: אותו אורך, סוג ועובי — במקביל, במרחק מדויק (בלי הפתחים)
+function copyWallDialog(w) {
+  const L = len(w), nx = -(w.y2 - w.y1) / L, ny = (w.x2 - w.x1) / L;
+  const horiz = Math.abs(nx) < Math.abs(ny); // קיר אופקי → ההעתק למעלה/למטה
+  const sides = horiz ? [[ny < 0 ? 1 : -1, '⬆️ למעלה'], [ny < 0 ? -1 : 1, '⬇️ למטה']] : [[nx > 0 ? -1 : 1, '⬅️ שמאלה'], [nx > 0 ? 1 : -1, '➡️ ימינה']];
+  modal('⧉ העתקת קיר', `<div class="muted">נוצר קיר זהה (${fmt(L)} ס"מ, ${WALL_TYPES[w.type]?.name || ''}) במקביל לקיר הזה.</div>
+    <label>מרחק בין הקירות (ס"מ, ממרכז למרכז)</label><input id="cd" type="number" inputmode="numeric" value="${P.lastCopyDist || 300}">
+    <label>לאיזה צד?</label><div class="grid2">${sides.map(([k, n]) => `<button class="btn ${k === sides[0][0] ? '' : 'sec'}" data-side="${k}">${n}</button>`).join('')}</div>
+    <label>כמה העתקים?</label><input id="cn" type="number" inputmode="numeric" value="1" min="1" max="20">
+    <div class="muted" style="margin-top:6px">כמה העתקים = שורה של קירות באותו מרווח (למשל מחיצות). אחרי ההעתקה אפשר לגרור כל קיר.</div>`, (b, close) => {
+    b.querySelectorAll('[data-side]').forEach(btn => btn.onclick = () => {
+      const d = +$('#cd', b).value, n = Math.max(1, Math.min(20, +$('#cn', b).value || 1)); if (!(d > 0)) return toast('מקלידים מרחק');
+      P.lastCopyDist = d; const k = +btn.dataset.side; let last = null;
+      for (let i = 1; i <= n; i++) { const off = d * i * k; last = { ...w, id: 'w' + uid(), x1: Math.round(w.x1 + nx * off), y1: Math.round(w.y1 + ny * off), x2: Math.round(w.x2 + nx * off), y2: Math.round(w.y2 + ny * off) }; if (last.type === 'mamad') last.type = 'interior', last.thick = WALL_TYPES.interior.thick; P.plan.walls.push(last); }
+      P.sel = { kind: 'wall', id: last.id }; changed(); close(); draw(); renderProps(); toast(n > 1 ? `נוצרו ${n} קירות` : 'הקיר הועתק');
+    });
+  });
+}
 function selFurn() { if (P.sel?.kind !== 'furn' || P.showOriginal || P.tool !== 'select') return null; return (cur().furniture || []).find(x => x.id === P.sel.id) || null; }
 function hitRotHandle(pt) {
   const f = selFurn(); if (!f) return null; const s = P.view.s, a = (f.rot || 0) * Math.PI / 180, hd = f.d / 2 + 34 / s;
@@ -594,7 +612,7 @@ function renderFBar() {
   const bar = $('#fbar'); if (!bar) return; const f = selFurn(), wsel = selWall();
   if (wsel && wsel.type !== 'mamad') {
     bar.style.display = 'flex';
-    bar.innerHTML = `<button class="btn sec sm" data-n="0,-1">▲</button><button class="btn sec sm" data-n="0,1">▼</button><button class="btn sec sm" data-n="1,0">▶</button><button class="btn sec sm" data-n="-1,0">◀</button><button class="btn sm" id="fok">✓</button>
+    bar.innerHTML = `<button class="btn sec sm" data-n="0,-1">▲</button><button class="btn sec sm" data-n="0,1">▼</button><button class="btn sec sm" data-n="1,0">▶</button><button class="btn sec sm" data-n="-1,0">◀</button><button class="btn sec sm" id="wcopy">⧉ העתקה</button><button class="btn sm" id="fok">✓</button>
       <div class="muted" style="width:100%;text-align:center;font-size:11px">גוררים את הקיר (✥) להזזה · גוררים עיגול בקצה לשינוי אורך וכיוון · חצים = ס"מ אחד</div>`;
     const links = [...linkedEnds(wsel, 1), ...linkedEnds(wsel, 2)];
     bar.querySelectorAll('[data-n]').forEach(b => {
@@ -605,6 +623,7 @@ function renderFBar() {
       b.onpointerup = stop; b.onpointerleave = stop; b.onpointercancel = stop;
     });
     $('#fok', bar).onclick = () => { P.sel = null; draw(); renderProps(); };
+    $('#wcopy', bar).onclick = () => copyWallDialog(wsel);
     return;
   }
   if (!f) { bar.style.display = 'none'; return; }
@@ -676,7 +695,7 @@ function renderProps() {
       ${w.type === 'mamad' ? '<div class="rule red" style="margin-top:8px"><span class="dot red"></span><div>קיר ממ"ד — אסור לפרוץ, לקצר או להרוס.</div></div>' : ''}
       ${w.type === 'bearing' ? '<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div>קיר נושא — כל שינוי מחייב קונסטרוקטור.</div></div>' : ''}
       ${w.type === 'unknown' ? '<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div>לא ידוע אם הקיר נושא. כדאי לבדוק ולסמן.</div></div>' : ''}
-      ${ro ? '' : '<div style="height:10px"></div><button class="btn danger full" id="wdel">מחיקת הקיר</button>'}</div>`;
+      ${ro ? '' : '<div class="grid2" style="margin-top:10px"><button class="btn sec" id="wcp">⧉ העתקת קיר</button><button class="btn danger" id="wdel">מחיקת הקיר</button></div>'}</div>`;
     if (ro) return;
     $('#wt').onchange = e => {
       const nt = e.target.value;
@@ -698,6 +717,7 @@ function renderProps() {
       for (const o of P.plan.walls) if (o !== w) { if (Math.abs(o.x1 - ox) < 1 && Math.abs(o.y1 - oy) < 1) { o.x1 = w.x2; o.y1 = w.y2; } if (Math.abs(o.x2 - ox) < 1 && Math.abs(o.y2 - oy) < 1) { o.x2 = w.x2; o.y2 = w.y2; } }
       changed(); draw(); renderProps();
     };
+    $('#wcp').onclick = () => copyWallDialog(w);
     $('#wdel').onclick = () => {
       if (!checkRule(deleteRule(w))) return;
       P.plan.walls = P.plan.walls.filter(x => x !== w); P.plan.openings = P.plan.openings.filter(o => o.wallId !== w.id);
