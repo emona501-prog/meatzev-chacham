@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.8.5';
+const APP_VERSION = '0.9.1';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -129,7 +129,7 @@ function pickPhoto(multiple = false) {
 
 // ---------------- ניווט ----------------
 let V = { tab: 'projects', projectId: null, roomId: null, roomTab: 'design', catFilter: '' };
-const proj = () => S.projects.find(p => p.id === V.projectId);
+const proj = (id) => S.projects.find(p => p.id === (id || V.projectId));
 const room = () => proj()?.rooms.find(r => r.id === V.roomId);
 
 function go(patch) { Object.assign(V, patch); if (V.tab !== 'catalog') { V.selMode = false; const sb = document.getElementById('selBar'); if (sb) sb.remove(); } render(); window.scrollTo(0, 0); }
@@ -224,6 +224,9 @@ function renderProject(app) {
         <button class="btn danger sm" id="delP">מחיקה</button></div></div>
     <div class="card list-item" id="openPlan"><div class="ic">📐</div><div class="grow"><b>תוכנית הבית</b>
       <div class="muted">${p.plan?.walls?.length ? `${p.plan.walls.length} קירות · ${p.plan.openings.length} פתחים${p.plan.original ? ' · יש מצב קיים' : ''}` : 'סרטוט, תלת־ממד, ייצוא לאוטוקאד'}</div></div><span class="muted">‹</span></div>
+    <div class="card"><div class="row"><div class="grow"><b>🧺 אוסף הפרויקט</b> <span class="muted">(${(p.picks || []).length})</span>
+      <div class="muted">המוצרים שבחרתם לפרויקט — נכנסים אוטומטית לכל עיצוב</div></div><button class="btn sec sm" id="browseP">📖 דפדוף בקטלוג</button></div>
+      ${(p.picks || []).length ? `<div class="picks" id="picks">${p.picks.map(id => { const it = S.catalog.find(x => x.id === id); return it ? `<div class="pk" data-id="${id}"><img data-th="${id}"><button data-rm="${id}">✕</button><span>${esc(it.name)}</span></div>` : ''; }).join('')}</div>` : ''}</div>
     <div class="row" style="margin:6px 0 10px"><h2 class="grow" style="margin:0">חדרים</h2><button class="btn" id="newR">+ חדר</button></div>
     ${p.rooms.length ? p.rooms.map(r => {
       const c = catOf(r.cat);
@@ -233,6 +236,10 @@ function renderProject(app) {
   app.querySelectorAll('[data-cover]').forEach(async el => { const id = el.dataset.cover; if (id) { const d = await getImg(id); if (d) el.innerHTML = `<img src="${d}">`; } });
   app.querySelectorAll('.list-item[data-id]').forEach(el => el.onclick = () => go({ roomId: el.dataset.id, roomTab: 'design' }));
   $('#newR').onclick = () => roomForm();
+  $('#browseP').onclick = () => flipbook(S.catalog.slice().sort((a, b) => (R().catCats.indexOf(a.cat) - R().catCats.indexOf(b.cat)) || (b.updated || 0) - (a.updated || 0)), 0, p.id);
+  app.querySelectorAll('[data-th]').forEach(async im => { const it = S.catalog.find(x => x.id === im.dataset.th); if (!it) return; im.src = it.th || await getImg(it.img) || await Sync.fetchImg(it.img) || ''; });
+  app.querySelectorAll('.pk').forEach(el => el.onclick = (e) => { if (e.target.dataset.rm) return; const it = S.catalog.find(x => x.id === el.dataset.id); if (it) flipbook([it], 0, p.id); });
+  app.querySelectorAll('[data-rm]').forEach(bt => bt.onclick = () => { p.picks = (p.picks || []).filter(x => x !== bt.dataset.rm); p.updated = Date.now(); save(); render(); });
   $('#openPlan').onclick = () => go({ planOpen: true });
   $('#editP').onclick = () => projectForm(p);
   $('#printP').onclick = () => printProject(p);
@@ -431,6 +438,84 @@ function beforeAfter(wrap, before, after) {
   ba.addEventListener('pointermove', e => { if (e.buttons || e.pointerType === 'touch') move(e.clientX); });
 }
 
+// =====================================================================
+// 📖 ספר דפדוף: מוצר אחד בכל עמוד, דפדוף תלת־ממדי, הגדלה, והוספה לאוסף של פרויקט
+function flipbook(list, start = 0, projectId = '') {
+  if (!list.length) return toast('אין מוצרים להצגה');
+  let i = Math.max(0, Math.min(start, list.length - 1)), busy = false;
+  const ov = document.createElement('div'); ov.id = 'fbook';
+  ov.innerHTML = `<div class="fb-top"><button class="fb-x" id="fbX">✕</button><span id="fbN"></span><button class="fb-x" id="fbZ">🔍</button></div>
+    <div class="fb-stage" id="fbStage"></div>
+    <div class="fb-bot"><button class="btn sec" id="fbPrev">‹ הקודם</button><button class="btn" id="fbPick"></button><button class="btn sec" id="fbNext">הבא ›</button></div>`;
+  document.body.appendChild(ov); document.body.style.overflow = 'hidden';
+  const stage = ov.querySelector('#fbStage');
+  const inProjects = (it) => S.projects.filter(p => (p.picks || []).includes(it.id));
+  const page = (it) => {
+    const d = document.createElement('div'); d.className = 'fb-page';
+    d.innerHTML = `<div class="fb-img"><img alt=""></div>
+      <div class="fb-info"><div class="fb-cat">${esc(it.cat)}${it.sub ? ' › ' + esc(it.sub) : ''}</div><h3>${esc(it.name)}</h3>
+      ${[['🎨', it.color], ['📏', it.dims], ['🏷️', it.supplier], ['#', it.model], ['₪', it.price]].filter(x => x[1]).map(([k, v]) => `<span class="fb-chip">${k} ${esc(v)}</span>`).join('')}
+      ${it.note ? `<p>${esc(it.note)}</p>` : ''}${it.angles?.length ? `<div class="muted">🔄 ${it.angles.length + 1} זוויות — גוררים על התמונה</div>` : ''}</div>`;
+    (async () => {
+      const im = d.querySelector('img'); if (it.th) im.src = it.th;
+      const full = await getImg(it.img) || await Sync.fetchImg(it.img); const srcs = [full || it.th, ...(await loadImgs(it.angles || []))].filter(Boolean);
+      if (srcs.length > 1) attachSpin(im, srcs); else if (full) im.src = full;
+      im.ondblclick = () => zoomView(im.src);
+    })();
+    return d;
+  };
+  const refresh = () => {
+    const it = list[i]; ov.querySelector('#fbN').textContent = `${i + 1} מתוך ${list.length}`;
+    const pr = inProjects(it); const pb = ov.querySelector('#fbPick');
+    pb.textContent = projectId ? ((proj(projectId)?.picks || []).includes(it.id) ? '✓ באוסף הפרויקט' : '⭐ הוספה לפרויקט') : (pr.length ? `✓ ב-${pr.length} פרויקטים` : '⭐ הוספה לפרויקט');
+    pb.classList.toggle('sec', projectId ? (proj(projectId)?.picks || []).includes(it.id) : !!pr.length);
+    ov.querySelector('#fbPrev').disabled = i === 0; ov.querySelector('#fbNext').disabled = i === list.length - 1;
+  };
+  let cur = page(list[i]); stage.appendChild(cur); refresh();
+  const turn = (dir) => {
+    if (busy) return; const ni = i + dir; if (ni < 0 || ni >= list.length) return;
+    busy = true; const nxt = page(list[ni]); nxt.classList.add('under'); stage.insertBefore(nxt, cur);
+    cur.classList.add(dir > 0 ? 'turn-next' : 'turn-prev');
+    setTimeout(() => { cur.remove(); nxt.classList.remove('under'); cur = nxt; i = ni; refresh(); busy = false; }, 560);
+  };
+  ov.querySelector('#fbNext').onclick = () => turn(1);
+  ov.querySelector('#fbPrev').onclick = () => turn(-1);
+  ov.querySelector('#fbZ').onclick = () => { const im = cur.querySelector('img'); if (im?.src) zoomView(im.src); };
+  ov.querySelector('#fbX').onclick = () => { ov.remove(); document.body.style.overflow = ''; render(); };
+  ov.querySelector('#fbPick').onclick = () => {
+    const it = list[i];
+    const addTo = (p) => { p.picks = p.picks || []; if (p.picks.includes(it.id)) p.picks = p.picks.filter(x => x !== it.id); else p.picks.push(it.id); p.updated = Date.now(); save(); refresh(); toast(p.picks.includes(it.id) ? `נוסף לאוסף של "${p.name}"` : `הוסר מהאוסף של "${p.name}"`); };
+    if (projectId) return addTo(proj(projectId));
+    if (!S.projects.length) return toast('אין עדיין פרויקטים — יוצרים פרויקט בלשונית "פרויקטים"');
+    modal('לאיזה פרויקט להוסיף?', `<div id="pl">${S.projects.map(p => `<div class="card list-item" data-p="${p.id}"><div class="grow"><b>${esc(p.name)}</b><div class="muted">${(p.picks || []).length} מוצרים באוסף</div></div><span>${(p.picks || []).includes(it.id) ? '✓' : '＋'}</span></div>`).join('')}</div>`, (b, close) => {
+      b.querySelectorAll('[data-p]').forEach(el => el.onclick = () => { addTo(S.projects.find(p => p.id === el.dataset.p)); close(); });
+    });
+  };
+  // החלקה באצבע לדפדוף
+  let sx = null;
+  stage.addEventListener('touchstart', e => { if (e.touches.length === 1) sx = e.touches[0].clientX; }, { passive: true });
+  stage.addEventListener('touchend', e => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 60 && !e.target.closest('.fb-img')) turn(dx > 0 ? 1 : -1); });
+}
+// 🔍 הגדלה: צביטה / גלגלת / לחיצה כפולה, וגרירה
+function zoomView(src) {
+  const z = document.createElement('div'); z.id = 'zoomv';
+  z.innerHTML = `<img src="${src}"><button class="fb-x" style="position:absolute;top:14px;left:14px">✕</button><div class="muted" style="position:absolute;bottom:18px;width:100%;text-align:center;color:#ddd">צובטים להגדלה · גוררים להזזה · לחיצה כפולה לאיפוס</div>`;
+  document.body.appendChild(z);
+  const im = z.querySelector('img'); let sc = 1, tx = 0, ty = 0; const pts = new Map(); let d0 = 0, s0 = 1, last = null;
+  const ap = () => im.style.transform = `translate(${tx}px,${ty}px) scale(${sc})`;
+  z.querySelector('button').onclick = () => z.remove();
+  im.ondblclick = () => { sc = sc > 1 ? 1 : 2.5; tx = ty = 0; ap(); };
+  z.onwheel = (e) => { e.preventDefault(); sc = Math.min(6, Math.max(1, sc * (e.deltaY < 0 ? 1.15 : 0.87))); ap(); };
+  im.onpointerdown = (e) => { im.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]); if (pts.size === 2) { const [a, b] = [...pts.values()]; d0 = Math.hypot(a[0] - b[0], a[1] - b[1]); s0 = sc; } last = [e.clientX, e.clientY]; };
+  im.onpointermove = (e) => {
+    if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; sc = Math.min(6, Math.max(1, s0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / d0)); }
+    else if (sc > 1 && last) { tx += e.clientX - last[0]; ty += e.clientY - last[1]; }
+    last = [e.clientX, e.clientY]; ap();
+  };
+  im.onpointerup = im.onpointercancel = (e) => { pts.delete(e.pointerId); last = null; };
+}
+
 function viewImage(src) {
   modal('תצוגה', `<img src="${src}" style="width:100%;border-radius:12px">
     <div style="height:10px"></div><a class="btn sec full" href="${src}" download="meatzev-chacham.jpg" style="display:block;text-align:center;text-decoration:none">⬇️ שמירת התמונה</a>`);
@@ -438,7 +523,8 @@ function viewImage(src) {
 
 // ---------- סטודיו העיצוב ----------
 function studio(p, r, fromDesign) {
-  const sel = { base: fromDesign ? fromDesign.result : r.photos[0], style: fromDesign?.style || '', items: new Set(fromDesign?.items || []), keep: true, extras: [] };
+  const picks = (p.picks || []).filter(id => S.catalog.some(x => x.id === id));
+  const sel = { base: fromDesign ? fromDesign.result : r.photos[0], style: fromDesign?.style || '', items: new Set(fromDesign?.items || picks), keep: true, extras: [] };
   const roomNotes = [r.notes, ...(r.elements || []).map(e => e.title + ': ' + e.text)].filter(x => x && x.trim()).join('\n');
   const bases = [...r.photos.map(id => ({ id, label: 'מקור' })), ...r.designs.map(d => ({ id: d.result, label: 'הדמיה' }))];
   modal('✨ עיצוב חדש', `
@@ -447,6 +533,7 @@ function studio(p, r, fromDesign) {
     <label>2. סגנון (לא חובה)</label>
     <div class="chips" id="styles">${R().styles.map(s => `<span class="chip ${s === sel.style ? 'on' : ''}">${esc(s)}</span>`).join('')}</div>
     <label>3. מוצרים מהקטלוג (המערכת תשתמש בדיוק בהם)</label>
+    ${picks.length ? `<div class="rule green" style="margin-bottom:8px"><span class="dot green"></span><div>🧺 ${picks.length} מוצרים מאוסף הפרויקט כבר נבחרו. אפשר לבטל או להוסיף.</div></div>` : ''}
     ${S.catalog.length ? `<div class="chips" id="icats" style="margin-bottom:8px">${R().catCats.filter(c => S.catalog.some(x => x.cat === c)).map((c, i) => `<span class="chip ${i === 0 ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}</span>`).join('')}</div>
       <div class="thumbs" id="items"></div><div class="muted" id="selCount" style="margin-top:6px"></div>` : '<div class="muted">הקטלוג ריק. אפשר להוסיף מוצרים בלשונית "קטלוג".</div>'}
     <label>4. אלמנטים מצולמים (ריצוף, ספה, וילון… — מתמונה שצילמת או מהגלריה)</label>
@@ -1025,6 +1112,7 @@ async function renderCatalog(app) {
   const count = (c) => S.catalog.filter(x => x.cat === c).length;
   app.innerHTML = `
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2>
+      <button class="btn sec sm" id="openBook">📖 דפדוף</button>
       <button class="btn ${V.selMode ? '' : 'sec'} sm" id="selMode">${V.selMode ? '✓ סיום בחירה' : '☑️ בחירה מרובה'}</button>
       ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄</button>` : ''}</div>
     ${V.selMode ? `<div class="rule" style="margin-bottom:10px"><span class="dot"></span><div>לוחצים על מוצרים כדי לסמן אותם (או "בחר הכל"), ואז בוחרים: העברה, עריכה או מחיקה.</div></div>` : ''}
@@ -1057,6 +1145,7 @@ async function renderCatalog(app) {
   $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat, sub);
   $('#sortIn').onclick = () => sortInbox();
   $('#selMode').onclick = () => { CSEL.clear(); stay({ selMode: !V.selMode }); };
+  $('#openBook').onclick = () => flipbook(list, 0);
   selBar(list);
   if ($('#syncNow3')) $('#syncNow3').onclick = async () => { await Sync.run(true); render(); };
   if ($('#resume')) $('#resume').onclick = () => resumeSort();
