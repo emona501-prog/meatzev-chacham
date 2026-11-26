@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.8.3';
+const APP_VERSION = '0.8.4';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -1152,12 +1152,16 @@ Max 3 matches. If you cannot find a convincing match, return {"matches":[], "sur
   const links = (AI_LAST?.candidates?.[0]?.groundingMetadata?.groundingChunks || []).map(c => c.web).filter(Boolean).map(w => ({ title: w.title || '', url: w.uri }));
   return { matches: (j.matches || []).filter(m => m && m.name).slice(0, 3), sure: !!j.sure, links: links.slice(0, 5) };
 }
+// באילו קטגוריות חובה קוד יצרן / דגם (חומרי גמר וקבועים). באקססוריז ודקורציה — מספיקים תמונה, צבע וגובה.
+const CODE_CATS = ['ריצוף', 'חיפוי קירות', 'משטחים', 'צבע / טיח', 'כלים סניטריים', 'ברזים', 'תאורה', 'נגרות וארונות', 'דלתות וחלונות', 'מוצרי חשמל'];
+function codeRequired(cat) { return CODE_CATS.includes(cat); }
 async function sortOne(it, data, useWeb, onStatus) {
   const reasons = [];
   const a = await aiIdentify(data, onStatus);
   Object.assign(it, { name: a.name || it.name, cat: a.category || 'אחר', sub: a.sub || '', model: a.model || '', supplier: a.brand || '', dims: a.dims || '', color: a.color || '', price: a.price || '', note: [a.material, a.note].filter(Boolean).join(' · '), pending: false });
-  if (a.confidence !== 'high') reasons.push(a.confidence === 'low' ? 'הזיהוי לא ודאי — לבדוק מה זה בדיוק' : 'זיהוי סביר אבל לא בטוח — לוודא');
-  if (!it.model && useWeb) {
+  const needCode = codeRequired(it.cat);
+  if (a.confidence === 'low' || (needCode && a.confidence !== 'high')) reasons.push(a.confidence === 'low' ? 'הזיהוי לא ודאי — לבדוק מה זה בדיוק' : 'זיהוי סביר אבל לא בטוח — לוודא');
+  if (needCode && !it.model && useWeb) {
     try {
       onStatus && onStatus('🔎 מחפש את הדגם ברשת…');
       const w = await aiWebModel(it, data, onStatus);
@@ -1165,7 +1169,7 @@ async function sortOne(it, data, useWeb, onStatus) {
       if (w.matches.length) reasons.push(`נמצאו ${w.matches.length} התאמות אפשריות ברשת — לבחור את הנכונה ולוודא בקישור`);
       else reasons.push('לא נמצא דגם ברשת — לברר בחנות / אצל הספק');
     } catch { reasons.push('חסר מספר דגם (החיפוש ברשת לא הצליח כרגע)'); }
-  } else if (!it.model) reasons.push('חסר מספר דגם — לברר אצל הספק או לצלם את התווית');
+  } else if (needCode && !it.model) reasons.push('חסר קוד יצרן / דגם — לברר אצל הספק או לצלם את התווית');
   it.review = reasons.length > 0; it.reviewWhy = reasons;
   it.updated = Date.now();
 }
@@ -1290,7 +1294,7 @@ function itemForm(it, defCat, defSub) {
     <label>שם המוצר</label><input id="in" value="${esc(it?.name || '')}" placeholder="למשל: גרניט פורצלן דמוי בטון 60×120">
     <div class="grid2"><div><label>קטגוריה</label><select id="ic">${R().catCats.map(c => `<option ${(it?.cat || defCat) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
       <div><label>תת-קטגוריה</label><select id="isub"></select></div></div>
-    <div class="grid2"><div><label>מספר דגם / מק"ט</label><input id="im" value="${esc(it?.model || '')}" dir="ltr" placeholder="CAL-60120"></div>
+    <div class="grid2"><div><label>קוד יצרן / דגם</label><input id="im" value="${esc(it?.model || '')}" dir="ltr" placeholder="CAL-60120"></div>
       <div><label>ספק / מותג</label><input id="is" value="${esc(it?.supplier || '')}"></div></div>
     <div class="grid2"><div><label>מידות</label><input id="id" value="${esc(it?.dims || '')}" placeholder="60×120 ס&quot;מ"></div>
       <div><label>צבע / גימור</label><input id="ico" value="${esc(it?.color || '')}" placeholder="אפור מט"></div></div>
