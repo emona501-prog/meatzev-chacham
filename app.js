@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.8.2';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -132,7 +132,7 @@ let V = { tab: 'projects', projectId: null, roomId: null, roomTab: 'design', cat
 const proj = () => S.projects.find(p => p.id === V.projectId);
 const room = () => proj()?.rooms.find(r => r.id === V.roomId);
 
-function go(patch) { Object.assign(V, patch); render(); window.scrollTo(0, 0); }
+function go(patch) { Object.assign(V, patch); if (V.tab !== 'catalog') { V.selMode = false; const sb = document.getElementById('selBar'); if (sb) sb.remove(); } render(); window.scrollTo(0, 0); }
 // מעבר בתוך אותו מסך (למשל בחירת קטגוריה) — בלי לקפוץ למעלה
 async function stay(patch) { const y = window.scrollY; Object.assign(V, patch); await render(); window.scrollTo(0, y); requestAnimationFrame(() => window.scrollTo(0, y)); }
 
@@ -951,6 +951,41 @@ function catForm(old, focusSubs) {
   });
 }
 
+// ☑️ בחירה מרובה והעברה בין קטגוריות
+const CSEL = new Set();
+function selBar(list) {
+  let bar = $('#selBar');
+  if (!V.selMode || V.tab !== 'catalog') { if (bar) bar.remove(); return; }
+  if (!bar) { bar = document.createElement('div'); bar.id = 'selBar'; document.body.appendChild(bar); }
+  bar.innerHTML = `<b>נבחרו ${CSEL.size}</b><button class="btn sec sm" id="sbAll">בחר הכל (${list.length})</button><button class="btn sm" id="sbMove" ${CSEL.size ? '' : 'disabled'}>📂 העבר ל…</button>`;
+  bar.querySelector('#sbAll').onclick = () => { const all = list.every(x => CSEL.has(x.id)); list.forEach(x => all ? CSEL.delete(x.id) : CSEL.add(x.id)); stay({}); };
+  bar.querySelector('#sbMove').onclick = () => moveForm([...CSEL]);
+}
+function moveForm(ids) {
+  const cats = R().catCats;
+  const first = S.catalog.find(x => x.id === ids[0]);
+  modal(`העברת ${ids.length} מוצרים`, `
+    <label>לקטגוריה</label><select id="mvC">${cats.map(c => `<option ${c === (first?.cat) ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+    <label>תת-קטגוריה</label><select id="mvS"></select>
+    <input id="mvNew" placeholder="שם תת-קטגוריה חדשה" style="display:none;margin-top:6px">
+    <button class="btn full" id="mvGo" style="margin-top:14px">📂 העברה</button>`, (b, close) => {
+    const fill = () => { const l = subsOf($('#mvC', b).value); $('#mvS', b).innerHTML = `<option value="">— בלי תת-קטגוריה —</option>${l.map(x => `<option>${esc(x)}</option>`).join('')}<option value="__new">＋ תת-קטגוריה חדשה…</option>`; $('#mvNew', b).style.display = 'none'; };
+    fill(); $('#mvC', b).onchange = fill;
+    $('#mvS', b).onchange = () => { $('#mvNew', b).style.display = $('#mvS', b).value === '__new' ? '' : 'none'; if ($('#mvS', b).value === '__new') $('#mvNew', b).focus(); };
+    $('#mvGo', b).onclick = () => {
+      const cat = $('#mvC', b).value; let sub = $('#mvS', b).value;
+      if (sub === '__new') {
+        sub = $('#mvNew', b).value.trim(); if (!sub) return toast('צריך לכתוב שם לתת-הקטגוריה');
+        const C = editableRules(); C.subCats[cat] = [...new Set([...(C.subCats[cat] || []), sub])]; rulesChanged();
+      }
+      let n = 0;
+      for (const id of ids) { const it = S.catalog.find(x => x.id === id); if (!it) continue; it.cat = cat; it.sub = sub; it.updated = Date.now(); it.synced = false; Sync.pushItem(it); n++; }
+      save(); CSEL.clear(); close(); toast(`הועברו ${n} מוצרים ל"${cat}${sub ? ' › ' + sub : ''}"`, 3000);
+      go({ selMode: false, catFilter: cat, subFilter: sub });
+    };
+  });
+}
+
 async function renderCatalog(app) {
   setHeader('קטלוג מוצרים', false);
   const cat = V.catFilter;
@@ -960,7 +995,9 @@ async function renderCatalog(app) {
   const count = (c) => S.catalog.filter(x => x.cat === c).length;
   app.innerHTML = `
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2>
-      ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄 סנכרון</button>` : ''}</div>
+      <button class="btn ${V.selMode ? '' : 'sec'} sm" id="selMode">${V.selMode ? '✓ סיום בחירה' : '☑️ בחירה והעברה'}</button>
+      ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄</button>` : ''}</div>
+    ${V.selMode ? `<div class="rule" style="margin-bottom:10px"><span class="dot"></span><div>לוחצים על מוצרים כדי לסמן אותם (או "בחר הכל" בקטגוריה שפתוחה), ואז "העבר ל…".</div></div>` : ''}
     ${!Sync.ok() ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div><b>הקטלוג לא מחובר למאגר המשותף.</b> מה שמוסיפים כאן נשאר רק בטלפון הזה. מתחברים בהגדרות ← מאגר משותף (עם קוד ההזמנה).</div></div>`
       : S.sync.err ? `<div class="rule red" style="margin-bottom:10px"><span class="dot red"></span><div><b>הסנכרון לא עובד כרגע:</b> ${esc(S.sync.err)}</div></div>`
       : (() => { const u = S.catalog.filter(x => !x.synced).length; return u ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div>⚠️ ${u} מוצרים עוד לא עלו למאגר המשותף. <button class="btn sm" id="syncNow3">🔄 להעלות עכשיו</button></div></div>` : ''; })()}
@@ -989,6 +1026,8 @@ async function renderCatalog(app) {
   $('#newI').onclick = () => itemForm(null, cat === '__review' ? '' : cat, sub);
   $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat, sub);
   $('#sortIn').onclick = () => sortInbox();
+  $('#selMode').onclick = () => { CSEL.clear(); stay({ selMode: !V.selMode }); };
+  selBar(list);
   if ($('#syncNow3')) $('#syncNow3').onclick = async () => { await Sync.run(true); render(); };
   if ($('#resume')) $('#resume').onclick = () => resumeSort();
   $('#addCat').onclick = () => catForm(null);
@@ -999,7 +1038,8 @@ async function renderCatalog(app) {
     const d = document.createElement('div'); d.className = 'sw';
     d.innerHTML = `<div class="c"><img loading="lazy"></div>${it.review ? `<span class="flag">${it.pending ? '⏳' : '!'}</span>` : ''}${it.angles?.length ? `<span class="spin3d" title="${it.angles.length + 1} זוויות">🔄</span>` : ''}<div class="n">${esc(it.name)}</div>${it.sub && !V.subFilter ? `<div class="m">${esc(it.sub)}</div>` : ''}${it.model ? `<div class="m" dir="ltr">${esc(it.model)}</div>` : ''}`;
     cl.appendChild(d);
-    d.onclick = () => itemForm(it);
+    if (V.selMode && CSEL.has(it.id)) d.classList.add('picked');
+    d.onclick = () => { if (!V.selMode) return itemForm(it); CSEL.has(it.id) ? CSEL.delete(it.id) : CSEL.add(it.id); d.classList.toggle('picked'); selBar(list); };
     const im = d.querySelector('img'); im.onload = () => { const r = im.naturalWidth / im.naturalHeight; if (r > 1.5 || r < 0.67) im.classList.add('fit'); };
     // ברשימה מציגים תמונה ממוזערת קטנה (חוסך זיכרון — לא קורס גם עם אלפי מוצרים). את המלאה טוענים רק כשפותחים מוצר.
     if (it.th) im.src = it.th;
