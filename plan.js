@@ -246,7 +246,7 @@ const DEFS = `<defs>
 
 function draw() {
   if (!P.svg) return;
-  const eh = document.getElementById('emptyHint'); if (eh && (P.plan.walls.length || P.chain || P.tool === 'wall')) eh.remove();
+  const eh = document.getElementById('emptyHint'); if (eh && (P.plan.walls.length || P.chain || P.tool !== 'select')) { eh.remove(); P.hintClosed = true; }
   const pl = cur(), s = P.view.s;
   const bg = P.plan.bg && P.bgImgEl ? `<image href="${P.bgImgEl}" x="${P.plan.bg.x || 0}" y="${P.plan.bg.y || 0}" width="${P.plan.bg.w * P.plan.bg.scale}" height="${P.plan.bg.h * P.plan.bg.scale}" opacity="${P.plan.bg.opacity ?? 0.5}" preserveAspectRatio="none"/>` : '';
   // רשת
@@ -305,7 +305,8 @@ function open(app, p) {
       <svg id="psvg" width="100%" height="100%" style="display:block;touch-action:none;user-select:none"></svg>
       <div style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:6px">
         <button class="btn sec sm" id="zin">＋</button><button class="btn sec sm" id="zout">－</button><button class="btn sec sm" id="zfit">⤢</button></div>
-      ${!P.plan.walls.length && !P.plan.bg ? `<div id="emptyHint" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:80%;text-align:center;background:rgba(255,255,255,.93);border:1px dashed var(--accent);border-radius:14px;padding:14px;pointer-events:none;color:var(--ink);font-size:14px;line-height:1.5">
+      ${!P.plan.walls.length && !P.plan.bg && !P.hintClosed ? `<div id="emptyHint" style="position:absolute;bottom:10px;right:10px;left:62px;text-align:center;background:rgba(255,255,255,.95);border:1px dashed var(--accent);border-radius:14px;padding:12px 12px 10px;color:var(--ink);font-size:13px;line-height:1.45;z-index:2">
+        <button id="ehX" class="btn sm" style="position:absolute;top:6px;left:6px;padding:4px 10px">✕ הבנתי</button>
         <b>התוכנית ריקה</b><br>כל משבצת = 50 ס"מ<br><br>✏️ לשרטט: בוחרים <b>🧱 קיר</b>, נוגעים בנקודה אחת ואז בנקודה הבאה — הקירות נמשכים זה מזה. "✓ סיום קו" כשמסיימים.<br><br>📷 או: <b>🤖 זיהוי תוכנית מתמונה</b> (למטה) — והבית נבנה לבד.<br><br>⤢ מציג את כל התוכנית.</div>` : ''}
       <div id="fbar" style="position:absolute;bottom:8px;left:8px;right:8px;display:none;gap:5px;flex-wrap:wrap;justify-content:center;background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:12px;padding:6px"></div>
       <div id="chainBar" style="position:absolute;bottom:8px;right:8px;display:none"><button class="btn sm" id="endChain">✓ סיום קו</button></div>
@@ -328,6 +329,7 @@ function open(app, p) {
     </div>`;
   P.svg = $('#psvg');
   bindTools(); bindPointer(); renderProps();
+  if ($('#emptyHint')) { $('#emptyHint').addEventListener('pointerdown', e => e.stopPropagation()); $('#emptyHint').onclick = () => { $('#emptyHint')?.remove(); P.hintClosed = true; }; }
   $('#hUndo').onclick = () => histGo(-1); $('#hRedo').onclick = () => histGo(1); $('#hClear').onclick = clearMenu; histBtns();
   if (P.plan.bg) getImg(P.plan.bg.img).then(src => { P.bgImgEl = src; draw(); }); else P.bgImgEl = null;
   if (!P.fitted) { fit(); P.fitted = p.id; } else if (P.fitted !== p.id) { fit(); P.fitted = p.id; }
