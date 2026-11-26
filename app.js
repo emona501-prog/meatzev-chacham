@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.8.4';
+const APP_VERSION = '0.8.5';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -1153,7 +1153,8 @@ Max 3 matches. If you cannot find a convincing match, return {"matches":[], "sur
   return { matches: (j.matches || []).filter(m => m && m.name).slice(0, 3), sure: !!j.sure, links: links.slice(0, 5) };
 }
 // באילו קטגוריות חובה קוד יצרן / דגם (חומרי גמר וקבועים). באקססוריז ודקורציה — מספיקים תמונה, צבע וגובה.
-const CODE_CATS = ['ריצוף', 'חיפוי קירות', 'משטחים', 'צבע / טיח', 'כלים סניטריים', 'ברזים', 'תאורה', 'נגרות וארונות', 'דלתות וחלונות', 'מוצרי חשמל'];
+const CODE_CATS = ['ריצוף', 'חיפוי קירות', 'משטחים', 'צבע / טיח', 'כלים סניטריים', 'ברזים', 'נגרות וארונות', 'דלתות וחלונות', 'מוצרי חשמל'];
+// בתאורה חשוב המפרט (הברגה, צורת נורה, גוון אור K, הספק) — לא מק"ט
 function codeRequired(cat) { return CODE_CATS.includes(cat); }
 async function sortOne(it, data, useWeb, onStatus) {
   const reasons = [];
