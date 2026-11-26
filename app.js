@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.8.1';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -52,9 +52,8 @@ const DB = {
 let S = { projects: [], catalog: [], settings: { apiKey: '', model: DEFAULT_MODEL, printNotes: true, introLogo: true, introPresenter: true } };
 // כללים ורשימות שניתנים לעריכה (נשמרים ב-S.custom ומסתנכרנים למאגר המשותף)
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const DEFAULT_SUBS = {
-  'תאורה': ['מנורות תלייה', 'מנורת תקרה', 'צמוד תקרה', 'מנורה עומדת', 'מנורות לילה', 'מנורות קיר', 'אהילים', 'בתי מנורה', 'נורות', 'מנורות סטנדרט', 'צבעי נורה', 'מנורות LED', 'פסי לד', 'פלורסנט']
-};
+const DEFAULT_SUBS = window.CATALOG_SUBS || {};
+window.OLD_DEFAULT_SUBS = ['מנורות תלייה', 'מנורת תקרה', 'צמוד תקרה', 'מנורה עומדת', 'מנורות לילה', 'מנורות קיר', 'אהילים', 'בתי מנורה', 'נורות', 'מנורות סטנדרט', 'צבעי נורה', 'מנורות LED', 'פסי לד', 'פלורסנט'];
 function R() { return S.custom || { checks: CHECKS, fixed: FIXED_RULES, styles: STYLES, catCats: CATALOG_CATS, subCats: DEFAULT_SUBS }; }
 function subsOf(c) { const m = R().subCats || DEFAULT_SUBS; return (m && m[c]) || []; }
 // גווני אור לבחירה בסטודיו (נכנס להנחיה ל-AI)
@@ -62,7 +61,7 @@ const LIGHT_TONES = [['', 'כמו בתמונה'], ['cool', 'לבן קר (6500K)'
 const LIGHT_EN = { cool: 'cool white light, about 6500K', neutral: 'neutral natural white / creamy light, about 4000K', warm: 'warm yellow-orange light, about 2700K', amber: 'very warm amber light, about 2200K, vintage filament glow' };
 function editableRules() {
   if (!S.custom) S.custom = { checks: clone(CHECKS), fixed: clone(FIXED_RULES), styles: [...STYLES], catCats: [...CATALOG_CATS], updated: 0, base: window.RULES_VERSION || 1 };
-  if (!S.custom.subCats) S.custom.subCats = clone(DEFAULT_SUBS);
+  if (!S.custom.subCats) { S.custom.subCats = clone(DEFAULT_SUBS); S.custom.taxo = window.TAXONOMY_VERSION || 1; }
   return S.custom;
 }
 function rulesChanged() { S.custom.updated = Date.now(); save(); Sync.pushRules(); }
@@ -962,17 +961,17 @@ async function renderCatalog(app) {
   app.innerHTML = `
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2>
       ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄 סנכרון</button>` : ''}</div>
-    <div class="muted" style="margin-bottom:10px">מוצרים אמיתיים מהשוק. ה-AI משתמש בתמונה של המוצר ולא ממציא משהו אחר.
-      ${S.sync?.code ? '<br>🤝 המאגר משותף — כל מה שמוסיפים כאן מתעדכן אצל כל השותפים.' : ''}</div>
     ${!Sync.ok() ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div><b>הקטלוג לא מחובר למאגר המשותף.</b> מה שמוסיפים כאן נשאר רק בטלפון הזה. מתחברים בהגדרות ← מאגר משותף (עם קוד ההזמנה).</div></div>`
       : S.sync.err ? `<div class="rule red" style="margin-bottom:10px"><span class="dot red"></span><div><b>הסנכרון לא עובד כרגע:</b> ${esc(S.sync.err)}</div></div>`
       : (() => { const u = S.catalog.filter(x => !x.synced).length; return u ? `<div class="rule orange" style="margin-bottom:10px"><span class="dot orange"></span><div>⚠️ ${u} מוצרים עוד לא עלו למאגר המשותף. <button class="btn sm" id="syncNow3">🔄 להעלות עכשיו</button></div></div>` : ''; })()}
     <button class="btn full" id="sortIn" style="margin-bottom:10px;background:linear-gradient(135deg,#8a5a3c,#b0764e)">📥 זריקת תמונות למיון אוטומטי (AI)</button>
     ${nPend ? `<button class="btn sec full" id="resume" style="margin-bottom:10px">⏳ ${nPend} תמונות ממתינות למיון — המשך מיון</button>` : ''}
-    <div class="chips" style="margin-bottom:12px"><span class="chip ${!cat ? 'on' : ''}" data-c="">הכול (${S.catalog.length})</span>
-      ${nRev ? `<span class="chip ${cat === '__review' ? 'on' : ''}" data-c="__review" style="border-color:var(--orange);color:${cat === '__review' ? '#fff' : 'var(--orange)'};${cat === '__review' ? 'background:var(--orange)' : ''};font-weight:700">⚠️ לבירור (${nRev})</span>` : ''}
-      ${R().catCats.map(c => `<span class="chip ${cat === c ? 'on' : ''}" data-c="${esc(c)}">${esc(c)}${count(c) ? ` (${count(c)})` : ''}</span>`).join('')}
-      <span class="chip" id="addCat" style="border-style:dashed;font-weight:700">＋ קטגוריה חדשה</span></div>
+    <div class="catbar">
+      <div class="cb ${!cat ? 'on' : ''}" data-c=""><i>🗂️</i><span>הכול</span><b>${S.catalog.length}</b></div>
+      ${nRev ? `<div class="cb rev ${cat === '__review' ? 'on' : ''}" data-c="__review"><i>⚠️</i><span>לבירור</span><b>${nRev}</b></div>` : ''}
+      ${R().catCats.map(c => { const n = count(c); return `<div class="cb ${cat === c ? 'on' : ''} ${n ? '' : 'empty'}" data-c="${esc(c)}"><i>${(window.CATALOG_ICONS || {})[c] || '🏷️'}</i><span>${esc(c)}</span>${n ? `<b>${n}</b>` : ''}</div>`; }).join('')}
+      <div class="cb add" id="addCat"><i>＋</i><span>קטגוריה</span></div>
+    </div>
     ${cat && cat !== '__review' ? `<div class="subbox"><div class="row" style="margin-bottom:8px"><span class="grow"><b>${esc(cat)}</b>${sub ? ` › ${esc(sub)}` : ''}</span><button class="btn sec sm" id="editCat">✏️ עריכה</button></div>
       <div class="chips"><span class="chip ${!sub ? 'on' : ''}" data-s="">הכול</span>${subs.map(x => { const n = S.catalog.filter(i => i.cat === cat && i.sub === x).length; return `<span class="chip ${sub === x ? 'on' : ''}" data-s="${esc(x)}">${esc(x)}${n ? ` (${n})` : ''}</span>`; }).join('')}
       <span class="chip" id="addSub" style="border-style:dashed">＋ תת-קטגוריה</span></div></div>` : ''}
@@ -984,6 +983,7 @@ async function renderCatalog(app) {
     <div class="swatches" id="clist"></div>
     ${list.length ? '' : '<div class="empty"><b>🧱</b>אין מוצרים בקטגוריה הזו עדיין.</div>'}`;
   app.querySelectorAll('[data-c]').forEach(c => c.onclick = () => stay({ catFilter: c.dataset.c, subFilter: '' }));
+  { const on = app.querySelector('.catbar .cb.on'), bar = app.querySelector('.catbar'); if (on && bar) { const r = on.getBoundingClientRect(), br = bar.getBoundingClientRect(); bar.scrollLeft += (r.left + r.width / 2) - (br.left + br.width / 2); } }
   app.querySelectorAll('[data-s]').forEach(c => c.onclick = () => stay({ subFilter: c.dataset.s }));
   if ($('#addSub')) $('#addSub').onclick = () => catForm(cat, true);
   $('#newI').onclick = () => itemForm(null, cat === '__review' ? '' : cat, sub);
@@ -1415,7 +1415,7 @@ const Sync = {
   async syncRules() {
     const d = await this.req('/meta/rules');
     const rUpd = +(d?.fields?.updated?.integerValue || 0), lUpd = S.custom?.updated || 0;
-    if (d && rUpd > lUpd) { S.custom = JSON.parse(d.fields.data.stringValue); save(); fixLists(); return true; }
+    if (d && rUpd > lUpd) { S.custom = JSON.parse(d.fields.data.stringValue); save(); fixLists(); migrateTaxonomy(); return true; }
     if (S.custom && lUpd > rUpd) await this.pushRules();
     return false;
   },
@@ -1768,7 +1768,7 @@ function showHelp() {
   } catch (e) { toast('שגיאה בפתיחת האחסון: ' + e.message, 5000); }
   const jq = new URLSearchParams(location.search).get('join');
   if (jq) { history.replaceState(null, '', location.pathname); if (!Sync.ok() || confirm('להצטרף למאגר המשותף החדש?')) Sync.join(jq); }
-  migrateRules(); fixLists();
+  migrateRules(); fixLists(); migrateTaxonomy();
   render();
   playIntro(false);
   Sync.run(false);
@@ -1802,6 +1802,39 @@ function parseCatText(txt) {
   }
   const o = cats.indexOf('אחר'); if (o >= 0 && o !== cats.length - 1) { cats.splice(o, 1); cats.push('אחר'); }
   return { cats, subs };
+}
+// סידור מקצועי חד-פעמי: מוסיף את עץ הקטגוריות, ומכניס קטגוריות "קטנות" (נרות, פמוטים…) כתתי-קטגוריות במקום הנכון.
+// לא מוחק כלום: קטגוריות ותתים שהוספתם נשארים, ומוצרים עוברים יחד איתם.
+function migrateTaxonomy() {
+  const C = S.custom; if (!C || (C.taxo || 0) >= (window.TAXONOMY_VERSION || 1)) return;
+  C.subCats = C.subCats || {};
+  const ALIAS = { 'עציצים': 'עציצים וצמחים', 'עלים': 'עלים ופמפס', 'פמפיסים': 'עלים ופמפס', 'פמפסים': 'עלים ופמפס', 'סלסלות קש קטן-גדול': 'סלסלות קש', 'מנורות לילה': 'מנורות שולחן / לילה' };
+  const owner = {}; for (const [m, l] of Object.entries(DEFAULT_SUBS)) for (const x of l) owner[x] = m;
+  for (const [k, v] of Object.entries(ALIAS)) owner[k] = owner[v];
+  const moved = {};
+  const kept = [];
+  for (const c of C.catCats) {
+    const target = !CATALOG_CATS.includes(c) && owner[c];
+    if (target) { moved[c] = [target, ALIAS[c] || c]; } else kept.push(c);
+  }
+  // סדר: הקטגוריות המקצועיות לפי הסדר, ואחריהן מה שהוספתם בעצמכם, ו"אחר" בסוף
+  const extra = kept.filter(c => !CATALOG_CATS.includes(c));
+  C.catCats = [...CATALOG_CATS.filter(c => c !== 'אחר'), ...extra, 'אחר'];
+  for (const m of CATALOG_CATS) {
+    const mine = [...new Set((C.subCats[m] || []).map(x => ALIAS[x] || x))], def = DEFAULT_SUBS[m] || [];
+    // אם בניתם לקטגוריה רשימה משלכם — היא נשמרת כמו שהיא. אחרת מקבלים את הרשימה המקצועית (ומה שהוספתם בתוכה).
+    const ownWords = mine.filter(x => !def.includes(x) && !(window.OLD_DEFAULT_SUBS || []).includes(x));
+    C.subCats[m] = ownWords.length >= 3 ? mine : [...new Set([...def, ...mine])];
+    if (!C.subCats[m].length) delete C.subCats[m];
+  }
+  for (const it of S.catalog) {
+    let ch = false;
+    if (moved[it.cat]) { const [m, sb] = moved[it.cat]; it.cat = m; it.sub = sb; ch = true; }
+    if (it.sub && ALIAS[it.sub]) { it.sub = ALIAS[it.sub]; ch = true; }
+    if (ch) { it.updated = Date.now(); it.synced = false; }
+  }
+  C.taxo = window.TAXONOMY_VERSION || 1;
+  rulesChanged(); save();
 }
 function fixLists() {
   const C = S.custom; if (!C) return;
