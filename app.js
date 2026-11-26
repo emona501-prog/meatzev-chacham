@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '0.9.4';
+const APP_VERSION = '0.9.5';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -227,7 +227,8 @@ function renderProject(app) {
     <div class="card"><div class="row"><div class="grow"><b>🧺 אוסף הפרויקט</b> <span class="muted">(${(p.picks || []).length})</span>
       <div class="muted">המוצרים שבחרתם לפרויקט — נכנסים אוטומטית לכל עיצוב</div></div><button class="btn sec sm" id="browseP">📖 דפדוף בקטלוג</button></div>
       ${(p.picks || []).length ? `<div class="picks" id="picks">${p.picks.map(id => { const it = S.catalog.find(x => x.id === id); return it ? `<div class="pk" data-id="${id}"><img data-th="${id}"><button data-rm="${id}">✕</button><span>${esc(it.name)}</span></div>` : ''; }).join('')}</div>
-        <button class="btn full" id="designPicks" style="margin-top:10px">🎨 השלב הבא: לשלב את המוצרים בחדר ›</button>` : `<div class="muted" style="margin-top:8px">בוחרים מוצרים ב"דפדוף בקטלוג" (⭐), ואז ממשיכים מכאן לעיצוב החדר.</div>`}</div>
+        <button class="btn full" id="designPicks" style="margin-top:10px">🎨 השלב הבא: לשלב את המוצרים בחדר ›</button>
+        <button class="btn sec full" id="tryPicks" style="margin-top:8px">📸 לנסות אצלי — להניח על תמונה ולהזיז ביד</button>` : `<div class="muted" style="margin-top:8px">בוחרים מוצרים ב"דפדוף בקטלוג" (⭐), ואז ממשיכים מכאן לעיצוב החדר.</div>`}</div>
     <div class="row" style="margin:6px 0 10px"><h2 class="grow" style="margin:0">חדרים</h2><button class="btn" id="newR">+ חדר</button></div>
     ${p.rooms.length ? p.rooms.map(r => {
       const c = catOf(r.cat);
@@ -243,6 +244,7 @@ function renderProject(app) {
   app.querySelectorAll('[data-rm]').forEach(bt => bt.onclick = () => { p.picks = (p.picks || []).filter(x => x !== bt.dataset.rm); p.updated = Date.now(); save(); render(); });
   $('#openPlan').onclick = () => go({ planOpen: true });
   if ($('#designPicks')) $('#designPicks').onclick = () => designWithPicks(p);
+  if ($('#tryPicks')) $('#tryPicks').onclick = () => tryAtHome(p.picks || []);
   $('#editP').onclick = () => projectForm(p);
   $('#printP').onclick = () => printProject(p);
   $('#shareP').onclick = () => exportBackup([p]);
@@ -613,7 +615,7 @@ function flipbook(list, start = 0, projectId = '') {
   if (!list.length) return toast('אין מוצרים להצגה');
   let i = Math.max(0, Math.min(start, list.length - 1)), busy = false;
   const ov = document.createElement('div'); ov.id = 'fbook';
-  ov.innerHTML = `<div class="fb-top"><button class="fb-x" id="fbX">✕</button><span id="fbN"></span><span style="display:flex;gap:8px">${projectId ? '<button class="fb-x" id="fbDone" style="width:auto;padding:0 12px;border-radius:18px;font-size:14px">✓ סיימתי ›</button>' : ''}<button class="fb-x" id="fbRev" title="הפיכת כיוון הדפדוף">⇄</button><button class="fb-x" id="fbZ">🔍</button></span></div>
+  ov.innerHTML = `<div class="fb-top"><button class="fb-x" id="fbX">✕</button><span id="fbN"></span><span style="display:flex;gap:8px">${projectId ? '<button class="fb-x" id="fbDone" style="width:auto;padding:0 12px;border-radius:18px;font-size:14px">✓ סיימתי ›</button>' : ''}<button class="fb-x" id="fbRev" title="הפיכת כיוון הדפדוף">⇄</button><button class="fb-x" id="fbTry" title="לנסות אצלי">📸</button><button class="fb-x" id="fbZ">🔍</button></span></div>
     <div class="fb-stage" id="fbStage"></div>
     <div class="fb-bot"><button class="btn sec" id="fbPrev">‹ הקודם</button><button class="btn" id="fbPick"></button><button class="btn sec" id="fbNext">הבא ›</button></div>`;
   document.body.appendChild(ov); document.body.style.overflow = 'hidden';
@@ -680,6 +682,7 @@ function flipbook(list, start = 0, projectId = '') {
   ov.querySelector('#fbRev').onclick = () => { S.settings.fbRev = !S.settings.fbRev; save(); toast(S.settings.fbRev ? 'כיוון הדפדוף הופך: גרירה שמאלה = הבא' : 'כיוון רגיל: גרירה ימינה = הבא'); };
   ov.querySelector('#fbNext').onclick = () => turn(1);
   ov.querySelector('#fbPrev').onclick = () => turn(-1);
+  ov.querySelector('#fbTry').onclick = () => tryAtHome([list[i].id]);
   ov.querySelector('#fbZ').onclick = () => { const im = cur.querySelector('img'); if (im?.src) zoomView(im.src); };
   ov.querySelector('#fbX').onclick = () => { ov.remove(); document.body.style.overflow = ''; render(); };
   if (ov.querySelector('#fbDone')) ov.querySelector('#fbDone').onclick = () => {
@@ -694,6 +697,198 @@ function flipbook(list, start = 0, projectId = '') {
     if (!S.projects.length) return toast('אין עדיין פרויקטים — יוצרים פרויקט בלשונית "פרויקטים"');
     modal('לאיזה פרויקט להוסיף?', `<div id="pl">${S.projects.map(p => `<div class="card list-item" data-p="${p.id}"><div class="grow"><b>${esc(p.name)}</b><div class="muted">${(p.picks || []).length} מוצרים באוסף</div></div><span>${(p.picks || []).includes(it.id) ? '✓' : '＋'}</span></div>`).join('')}</div>`, (b, close) => {
       b.querySelectorAll('[data-p]').forEach(el => el.onclick = () => { addTo(S.projects.find(p => p.id === el.dataset.p)); close(); });
+    });
+  };
+}
+// =====================================================================
+// 📸 לנסות אצלי — מצלמים פינה בבית (או מצלמה חיה) ומניחים עליה מוצרים מהקטלוג
+// גרירה = הזזה · שתי אצבעות = הגדלה וסיבוב · הידית ↘ = הגדלה וסיבוב באצבע אחת
+const CUT_CACHE = {};
+async function cutoutWhite(src, key) { // מסיר רקע לבן מהקצוות פנימה (המוצר עצמו נשמר גם אם יש בו לבן)
+  if (key && CUT_CACHE[key]) return CUT_CACHE[key];
+  const im = await loadImg(src), sc = Math.min(1, 900 / Math.max(im.width, im.height));
+  const W = Math.round(im.width * sc), H = Math.round(im.height * sc), c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d'); x.drawImage(im, 0, 0, W, H); const d = x.getImageData(0, 0, W, H), p = d.data;
+  const bgish = (i) => { const r = p[i], g = p[i + 1], b = p[i + 2]; return Math.min(r, g, b) > 228 && Math.max(r, g, b) - Math.min(r, g, b) < 22; };
+  const seen = new Uint8Array(W * H), st = [];
+  for (let i = 0; i < W; i++) st.push(i, (H - 1) * W + i); for (let j = 0; j < H; j++) st.push(j * W, j * W + W - 1);
+  while (st.length) { const k = st.pop(); if (seen[k]) continue; seen[k] = 1; if (!bgish(k * 4)) { seen[k] = 2; continue; } p[k * 4 + 3] = 0; const xx = k % W, yy = (k / W) | 0;
+    if (xx > 0) st.push(k - 1); if (xx < W - 1) st.push(k + 1); if (yy > 0) st.push(k - W); if (yy < H - 1) st.push(k + W); }
+  for (let k = 0; k < W * H; k++) if (seen[k] === 2) { // ריכוך קצה: פיקסל גבול בהיר מקבל שקיפות חלקית
+    const i = k * 4, lum = Math.min(p[i], p[i + 1], p[i + 2]); if (lum > 200) p[i + 3] = Math.round(255 * Math.min(1, (255 - lum) / 55 + .35)); }
+  x.putImageData(d, 0, 0);
+  // חיתוך לגבולות המוצר
+  let x0 = W, y0 = H, x1 = 0, y1 = 0; for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) if (p[(yy * W + xx) * 4 + 3] > 20) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; if (yy > y1) y1 = yy; }
+  if (x1 <= x0) return src;
+  const o = document.createElement('canvas'); o.width = x1 - x0 + 1; o.height = y1 - y0 + 1; o.getContext('2d').drawImage(c, -x0, -y0);
+  const url = o.toDataURL('image/png'); if (key) CUT_CACHE[key] = url; return url;
+}
+function tryAtHome(startIds = []) {
+  const ov = document.createElement('div'); ov.id = 'tryv';
+  ov.innerHTML = `<style>
+    #tryv{position:fixed;inset:0;z-index:210;background:#14110f;display:flex;flex-direction:column;color:#fff;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+    #tryv .tb{display:flex;gap:6px;padding:8px;flex-wrap:wrap;align-items:center}
+    #tryv .tb .btn{padding:7px 10px;font-size:13px}
+    #tryv .main{flex:1;display:flex;min-height:0}
+    #tryv .stage{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+    #tryv .wrap{position:relative;touch-action:none}
+    #tryv .wrap>img.bg,#tryv .wrap>video{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none}
+    #tryv .rail{width:84px;background:#221c18;overflow-y:auto;padding:6px 4px;display:flex;flex-direction:column;gap:8px;border-inline-start:1px solid #3a302a}
+    #tryv .rail .ri{width:74px;height:74px;border-radius:50%;background:#fff;overflow:hidden;flex:none;border:3px solid transparent;position:relative}
+    #tryv .rail .ri img{width:100%;height:100%;object-fit:contain}
+    #tryv .rail .ri.on{border-color:#e2a26f}
+    #tryv .rail .rn{font-size:10px;line-height:1.15;text-align:center;color:#d9cfc6;margin-top:-4px;max-height:2.3em;overflow:hidden}
+    #tryv .rail select{width:100%;font-size:11px;padding:4px;border-radius:8px}
+    #tryv .stk{position:absolute;left:0;top:0;transform-origin:center center;touch-action:none;user-select:none}
+    #tryv .stk img{display:block;width:100%;pointer-events:none;-webkit-user-drag:none}
+    #tryv .stk.sel{outline:2px dashed #e2a26f;outline-offset:4px}
+    #tryv .stk .hd{position:absolute;width:30px;height:30px;border-radius:50%;background:#e2a26f;color:#fff;display:none;align-items:center;justify-content:center;font-size:16px;bottom:-22px;left:-22px;box-shadow:0 1px 4px #0008}
+    #tryv .stk.sel .hd{display:flex}
+    #tryv .start{display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;padding:20px;text-align:center}
+    #tryv .sbar{display:none;gap:6px;padding:6px 8px;flex-wrap:wrap;justify-content:center;background:#221c18}
+    #tryv input[type=range]{width:110px}
+  </style>
+  <div class="tb"><button class="btn sm" id="tX">✕</button><b style="flex:1">📸 לנסות אצלי</b>
+    <button class="btn sec sm" id="tNew">🖼️ תמונה אחרת</button><button class="btn sec sm" id="tSave">💾 שמירה</button><button class="btn sm" id="tAI">✨ ריאליסטי</button></div>
+  <div class="main"><div class="stage" id="tStage"><div class="start" id="tStart">
+      <div style="font-size:44px">🛋️📸</div><div style="max-width:300px;color:#ddd">מצלמים את השולחן, הפינה או המדף — ואז בוחרים מוצרים מהסרגל בצד ומניחים אותם על התמונה.</div>
+      <button class="btn" id="tCam">📷 מצלמה חיה</button><button class="btn sec" id="tShot">📸 לצלם תמונה</button><button class="btn sec" id="tGal">🖼️ תמונה מהגלריה</button></div></div>
+    <div class="rail" id="tRail"></div></div>
+  <div class="sbar" id="tSbar"><button class="btn sec sm" data-s="flip">↔️ היפוך</button><button class="btn sec sm" data-s="front">⬆️ קדימה</button><button class="btn sec sm" data-s="dup">⧉ עוד אחד</button>
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px">☀️<input type="range" id="tLight" min="55" max="135" value="100"></label>
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px">🌑<input type="range" id="tShadow" min="0" max="100" value="55"></label>
+    <button class="btn danger sm" data-s="del" style="padding:7px 12px">🗑️ הסרה</button></div>`;
+  document.body.appendChild(ov); document.body.style.overflow = 'hidden';
+  const stage = ov.querySelector('#tStage'), rail = ov.querySelector('#tRail'), sbar = ov.querySelector('#tSbar');
+  let wrap = null, bgEl = null, stream = null, natW = 0, natH = 0, sel = null; const stks = [];
+  const close = () => { stream?.getTracks().forEach(t => t.stop()); ov.remove(); document.body.style.overflow = ''; };
+  ov.querySelector('#tX').onclick = close;
+  // ---- רקע ----
+  function layout() { // מתאים את המסגרת ליחס של התמונה ולגודל הבמה
+    if (!wrap || !natW) return; const sw = stage.clientWidth, sh = stage.clientHeight, k = Math.min(sw / natW, sh / natH);
+    const w = natW * k, h = natH * k, ow = parseFloat(wrap.style.width) || w;
+    wrap.style.width = w + 'px'; wrap.style.height = h + 'px'; stks.forEach(t => place(t));
+  }
+  function setupWrap(el) {
+    stage.innerHTML = ''; wrap = document.createElement('div'); wrap.className = 'wrap'; wrap.appendChild(el); stage.appendChild(wrap); bgEl = el;
+    stks.forEach(t => wrap.appendChild(t.el)); layout();
+    wrap.addEventListener('pointerdown', e => { if (e.target === bgEl || e.target === wrap) selectStk(null); });
+  }
+  async function useImage(src) {
+    stream?.getTracks().forEach(t => t.stop()); stream = null;
+    const im = await loadImg(src); natW = im.width; natH = im.height; const el = document.createElement('img'); el.className = 'bg'; el.src = src; setupWrap(el);
+    ov.querySelector('#tNew').textContent = '🖼️ תמונה אחרת';
+  }
+  async function useCam() {
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
+    catch { toast('אין גישה למצלמה — אפשר לצלם תמונה במקום'); return; }
+    const v = document.createElement('video'); v.playsInline = true; v.muted = true; v.autoplay = true; v.srcObject = stream;
+    await new Promise(r => v.onloadedmetadata = r); await v.play().catch(() => {}); natW = v.videoWidth; natH = v.videoHeight; setupWrap(v);
+    ov.querySelector('#tNew').textContent = '⏸ הקפאה';
+  }
+  const frameData = () => { const c = document.createElement('canvas'); c.width = natW; c.height = natH; c.getContext('2d').drawImage(bgEl, 0, 0, natW, natH); return c.toDataURL('image/jpeg', 0.92); };
+  ov.querySelector('#tCam').onclick = useCam;
+  ov.querySelector('#tShot').onclick = async () => { const f = await pickFiles(false, true); if (f[0]) useImage(await compressImage(f[0], 2000, 0.9)); };
+  ov.querySelector('#tGal').onclick = async () => { const f = await pickFiles(false); if (f[0]) useImage(await compressImage(f[0], 2000, 0.9)); };
+  ov.querySelector('#tNew').onclick = async () => {
+    if (stream) { const d = frameData(); await useImage(d); toast('התמונה הוקפאה — עכשיו ממקמים בנחת'); return; }
+    const r = await pickPhoto(false); if (r[0]) useImage(await compressImage(r[0], 2000, 0.9));
+  };
+  // ---- מדבקות (מוצרים על התמונה) ----
+  function place(t) {
+    const W = wrap.clientWidth, H = wrap.clientHeight, w = t.w * W;
+    t.el.style.width = w + 'px';
+    t.el.style.transform = `translate(${t.x * W - w / 2}px, ${t.y * H - (t.el.offsetHeight || w) / 2}px) rotate(${t.rot}deg) scaleX(${t.flip ? -1 : 1})`;
+    const sh = t.shadow / 100;
+    t.el.querySelector('img').style.filter = `brightness(${t.light / 100}) drop-shadow(${3 * sh}px ${10 * sh}px ${8 * sh + 2}px rgba(0,0,0,${0.15 + sh * 0.45}))`;
+  }
+  function selectStk(t) {
+    sel = t; stks.forEach(x => x.el.classList.toggle('sel', x === t)); sbar.style.display = t ? 'flex' : 'none';
+    if (t) { ov.querySelector('#tLight').value = t.light; ov.querySelector('#tShadow').value = t.shadow; }
+    rail.querySelectorAll('.ri').forEach(r => r.classList.toggle('on', stks.some(s => s.id === r.dataset.id)));
+  }
+  async function addStk(it, from) {
+    if (!wrap) { toast('קודם מצלמים או בוחרים תמונה של המקום'); return; }
+    const src = (await getImg(it.img)) || (await Sync.fetchImg(it.img)) || it.th; if (!src) return toast('אין תמונה למוצר הזה');
+    const cut = await cutoutWhite(src, it.img);
+    const el = document.createElement('div'); el.className = 'stk'; el.innerHTML = `<img src="${cut}"><div class="hd">↘</div>`;
+    const t = from ? { ...from, el, x: Math.min(.9, from.x + .06) } : { id: it.id, it, el, x: .5, y: .55, w: .28, rot: 0, flip: false, light: 100, shadow: 55 };
+    wrap.appendChild(el); stks.push(t); await new Promise(r => { const i = el.querySelector('img'); i.complete ? r() : i.onload = r; }); place(t); selectStk(t); bindStk(t);
+  }
+  function bindStk(t) {
+    const pts = new Map(); let g = null;
+    const st = () => { const v = [...pts.values()]; if (v.length >= 2) { const [a, b] = v; g = { pinch: true, d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x), w: t.w, rot: t.rot }; } else if (v.length === 1) { const [a] = v; g = { x: a.x, y: a.y, tx: t.x, ty: t.y }; } else g = null; };
+    t.el.addEventListener('pointerdown', e => {
+      e.stopPropagation(); t.el.setPointerCapture(e.pointerId); selectStk(t);
+      if (e.target.classList.contains('hd')) { const r = t.el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        g = { handle: true, cx, cy, d: Math.hypot(e.clientX - cx, e.clientY - cy), ang: Math.atan2(e.clientY - cy, e.clientX - cx), w: t.w, rot: t.rot }; pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); return; }
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); st();
+    });
+    t.el.addEventListener('pointermove', e => {
+      if (!pts.has(e.pointerId) || !g) return; pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const W = wrap.clientWidth, H = wrap.clientHeight;
+      if (g.handle) { const d = Math.hypot(e.clientX - g.cx, e.clientY - g.cy), a = Math.atan2(e.clientY - g.cy, e.clientX - g.cx); t.w = Math.max(.03, Math.min(1.5, g.w * d / g.d)); t.rot = g.rot + (a - g.ang) * 180 / Math.PI; }
+      else if (g.pinch && pts.size >= 2) { const [a, b] = [...pts.values()]; t.w = Math.max(.03, Math.min(1.5, g.w * Math.hypot(a.x - b.x, a.y - b.y) / g.d)); t.rot = g.rot + (Math.atan2(b.y - a.y, b.x - a.x) - g.ang) * 180 / Math.PI; }
+      else if (!g.pinch) { t.x = g.tx + (e.clientX - g.x) / W; t.y = g.ty + (e.clientY - g.y) / H; }
+      const near = Math.round(t.rot / 90) * 90; if (Math.abs(t.rot - near) < 3) t.rot = near; place(t);
+    });
+    const up = e => { pts.delete(e.pointerId); if (g?.handle) g = null; else st(); };
+    t.el.addEventListener('pointerup', up); t.el.addEventListener('pointercancel', up);
+  }
+  sbar.querySelectorAll('[data-s]').forEach(b => b.onclick = () => {
+    if (!sel) return; const a = b.dataset.s;
+    if (a === 'flip') { sel.flip = !sel.flip; place(sel); }
+    if (a === 'front') { wrap.appendChild(sel.el); stks.push(stks.splice(stks.indexOf(sel), 1)[0]); }
+    if (a === 'dup') addStk(sel.it, sel);
+    if (a === 'del') { sel.el.remove(); stks.splice(stks.indexOf(sel), 1); selectStk(null); }
+  });
+  ov.querySelector('#tLight').oninput = e => { if (sel) { sel.light = +e.target.value; place(sel); } };
+  ov.querySelector('#tShadow').oninput = e => { if (sel) { sel.shadow = +e.target.value; place(sel); } };
+  // ---- סרגל המוצרים ----
+  const all = S.catalog.filter(x => !x.deleted && x.img);
+  const projPicks = S.projects.flatMap(p => p.picks || []);
+  const groups = [...new Set(all.map(x => x.sub || x.cat))];
+  function drawRail(filter) {
+    const list = filter === '__mine' ? all.filter(x => startIds.includes(x.id) || projPicks.includes(x.id)) : filter ? all.filter(x => (x.sub || x.cat) === filter) : all;
+    rail.innerHTML = `<select id="tF"><option value="">הכל (${all.length})</option>${projPicks.length || startIds.length ? `<option value="__mine" ${filter === '__mine' ? 'selected' : ''}>⭐ מהפרויקטים</option>` : ''}${groups.map(g => `<option ${g === filter ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>` +
+      list.map(it => `<div class="ri" data-id="${it.id}"><img src="${it.th || ''}"></div><div class="rn">${esc(it.name)}</div>`).join('') || '<div class="rn">אין מוצרים</div>';
+    rail.querySelector('#tF').onchange = e => drawRail(e.target.value);
+    rail.querySelectorAll('.ri').forEach(r => r.onclick = () => addStk(all.find(x => x.id === r.dataset.id)));
+    selectStk(sel);
+  }
+  drawRail(startIds.length || projPicks.length ? '__mine' : '');
+  addEventListener('resize', layout);
+  // ---- שמירה / שיתוף / AI ----
+  async function compose() {
+    if (!wrap) return null; const c = document.createElement('canvas'); c.width = natW; c.height = natH; const x = c.getContext('2d');
+    x.drawImage(bgEl, 0, 0, natW, natH); const k = natW / wrap.clientWidth;
+    for (const t of stks) {
+      const im = t.el.querySelector('img'), w = t.w * natW, h = w * im.naturalHeight / im.naturalWidth, sh = t.shadow / 100;
+      x.save(); x.translate(t.x * natW, t.y * natH); x.rotate(t.rot * Math.PI / 180); if (t.flip) x.scale(-1, 1);
+      x.shadowColor = `rgba(0,0,0,${0.15 + sh * 0.45})`; x.shadowBlur = (8 * sh + 2) * k; x.shadowOffsetX = 3 * sh * k; x.shadowOffsetY = 10 * sh * k;
+      x.filter = `brightness(${t.light / 100})`; x.drawImage(im, -w / 2, -h / 2, w, h); x.restore();
+    }
+    return c.toDataURL('image/jpeg', 0.92);
+  }
+  async function shareData(d, name) {
+    const blob = await (await fetch(d)).blob(), file = new File([blob], name, { type: 'image/jpeg' });
+    if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: 'איך זה ייראה אצלי' }); return; } catch {} }
+    const a = document.createElement('a'); a.href = d; a.download = name; a.click(); toast('נשמר בהורדות');
+  }
+  ov.querySelector('#tSave').onclick = async () => { if (!stks.length) return toast('קודם מוסיפים מוצר מהסרגל'); selectStk(null); shareData(await compose(), 'לנסות-אצלי.jpg'); };
+  ov.querySelector('#tAI').onclick = async () => {
+    if (!stks.length) return toast('קודם מוסיפים מוצר מהסרגל');
+    if (!S.settings.apiKey) return toast('צריך מפתח AI בהגדרות');
+    const comp = await compose(); const refs = [];
+    for (const t of stks) if (!refs.some(r => r.item.id === t.it.id)) refs.push({ item: t.it, img: (await getImg(t.it.img)) || t.it.th });
+    modal('✨ שילוב ריאליסטי עם AI', `<div class="muted">ה-AI ישאיר את המוצרים בדיוק במקום ובגודל שקבעת, ורק יתאים תאורה, צללים, השתקפויות ופרספקטיבה כדי שזה ייראה אמיתי. (הדמיה אחת בתשלום — ${TIERS[tier()].price})</div><div id="aiO" style="margin-top:10px"><div style="text-align:center"><div class="spinner"></div>יוצר…</div></div>`, async (b) => {
+      const o = b.querySelector('#aiO');
+      try {
+        const prompt = 'Photo-realistic compositing task. The first image is a real photo of a room where product cut-outs were placed by hand. Make the placed products look like they truly stand in this room: match the scene lighting direction and color temperature, add correct contact shadows and soft ambient occlusion where they touch the surface, add subtle reflections on glossy surfaces, fix perspective slightly so they sit on the surface naturally. Do NOT move, resize, add or remove anything. Keep each product\'s exact design, shape, color and material identical to its reference image. Keep the rest of the photo exactly the same.';
+        const res = await aiEdit(comp, refs, prompt);
+        o.innerHTML = ''; const wrapBA = document.createElement('div'); o.appendChild(wrapBA); beforeAfter(wrapBA, comp, res);
+        const bt = document.createElement('button'); bt.className = 'btn full'; bt.style.marginTop = '10px'; bt.textContent = '📤 שיתוף / שמירה'; bt.onclick = () => shareData(res, 'לנסות-אצלי-AI.jpg'); o.appendChild(bt);
+      } catch (e) { o.innerHTML = `<div class="rule red"><span class="dot red"></span><div>${esc(e.message)}</div></div>`; }
     });
   };
 }
@@ -1326,7 +1521,7 @@ async function renderCatalog(app) {
   const count = (c) => S.catalog.filter(x => x.cat === c).length;
   app.innerHTML = `
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">קטלוג</h2>
-      <button class="btn sec sm" id="openBook">📖 דפדוף</button>
+      <button class="btn sec sm" id="openBook">📖 דפדוף</button><button class="btn sec sm" id="tryHome">📸 לנסות אצלי</button>
       <button class="btn ${V.selMode ? '' : 'sec'} sm" id="selMode">${V.selMode ? '✓ סיום בחירה' : '☑️ בחירה מרובה'}</button>
       ${S.sync?.code ? `<button class="btn sec sm" id="syncNow">🔄</button>` : ''}</div>
     ${V.selMode ? `<div class="rule" style="margin-bottom:10px"><span class="dot"></span><div>לוחצים על מוצרים כדי לסמן אותם (או "בחר הכל"), ואז בוחרים: העברה, עריכה או מחיקה.</div></div>` : ''}
@@ -1360,6 +1555,7 @@ async function renderCatalog(app) {
   $('#sortIn').onclick = () => sortInbox();
   $('#selMode').onclick = () => { CSEL.clear(); stay({ selMode: !V.selMode }); };
   $('#openBook').onclick = () => flipbook(list, 0);
+  $('#tryHome').onclick = () => tryAtHome([]);
   selBar(list);
   if ($('#syncNow3')) $('#syncNow3').onclick = async () => { await Sync.run(true); render(); };
   if ($('#resume')) $('#resume').onclick = () => resumeSort();

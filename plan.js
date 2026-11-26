@@ -31,6 +31,8 @@ const OPENING_DEF = {
 // w = רוחב, d = עומק (ס"מ). הצד האחורי למעלה (y=0), החזית למטה (y=d). h = גובה לתלת־ממד.
 const R = (x, y, w, h, r = 0, extra = '') => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ${extra}/>`;
 const FURN = {
+  catItem:  { name: 'מוצר מהקטלוג', cat: '__hidden', w: 30, d: 30, h: 30, c3: 0xffffff,
+    svg: (w, d) => `<ellipse cx="${w / 2}" cy="${d / 2}" rx="${w / 2}" ry="${d / 2}" stroke-dasharray="3 2"/><path d="M${w * .3},${d / 2} H${w * .7} M${w / 2},${d * .3} V${d * .7}"/>` },
   bed2:     { name: 'מיטה זוגית', cat: 'שינה', w: 160, d: 200, h: 50, c3: 0xe8e1d6,
     svg: (w, d) => R(0, 0, w, d) + R(w * .05, d * .04, w * .4, d * .2, 4) + R(w * .55, d * .04, w * .4, d * .2, 4) + `<path d="M0,${d * .29} H${w} M0,${d * .5} L${w * .26},${d * .29} V${d * .5} Z"/>` },
   bed1:     { name: 'מיטת יחיד', cat: 'שינה', w: 80, d: 190, h: 50, c3: 0xe8e1d6,
@@ -305,6 +307,7 @@ function open(app, p) {
     </div>
     <div id="props" style="margin-top:10px"></div>
     <div class="card" style="margin-top:10px">
+      <button class="btn full" id="bAiPlan" style="margin-bottom:8px">🤖 זיהוי תוכנית מתמונה — מצלמים, והבית נבנה לבד</button>
       <div class="grid2">
         <button class="btn" id="b3d">🏠 תלת־ממד</button>
         <button class="btn sec" id="bDxf">⬇️ ייצוא לאוטוקאד (DXF)</button>
@@ -328,6 +331,7 @@ function open(app, p) {
   $('#b3d').onclick = () => open3D(P.plan);
   $('#bDxf').onclick = () => exportDXF(p);
   $('#bBg').onclick = pickBackground;
+  $('#bAiPlan').onclick = aiPlanFromImage;
   $('#bOrig').onclick = () => {
     if (!P.plan.walls.length) return toast('קודם משרטטים את הבית');
     if (P.plan.original && !confirm('לעדכן את "מצב קיים" לתוכנית הנוכחית? המצב הקודם יוחלף.')) return;
@@ -523,7 +527,7 @@ function hitFurn(pt) {
 }
 function furnPicker() {
   if (P.showOriginal) return toast('במצב "לפני" אי אפשר לערוך');
-  const cats = [...new Set(Object.values(FURN).map(f => f.cat))];
+  const cats = [...new Set(Object.values(FURN).map(f => f.cat))].filter(c => c !== '__hidden');
   modal('🛋️ ספריית ריהוט וסניטריה', cats.map(c => `<h3 style="margin-top:10px">${c}</h3><div class="thumbs">${Object.entries(FURN).filter(([, f]) => f.cat === c).map(([k, f]) => {
     const pad = 30, vw = f.w + pad * 2, vh = f.d + pad * 2;
     return `<div class="t" data-k="${k}" style="background:#fff;aspect-ratio:auto;padding:4px;text-align:center"><svg viewBox="${-pad} ${-pad} ${vw} ${vh}" style="width:100%;height:70px"><g fill="#fff" stroke="#4a433d" stroke-width="${Math.max(vw, vh) / 90}">${f.svg(f.w, f.d)}</g></svg><div style="font-size:11px;line-height:1.2">${f.name}<br><span class="muted">${f.w}×${f.d}</span></div></div>`;
@@ -590,7 +594,7 @@ function renderProps() {
       }
     }
     const ed = (k, v) => v === Infinity ? `<div><label>${k[1]}</label><input disabled value="אין קיר"></div>` : `<div><label>${k[1]}</label><input type="number" inputmode="numeric" data-cl="${k[0]}" value="${Math.round(v)}" ${ro ? 'disabled' : ''}></div>`;
-    box.innerHTML = `<div class="card"><h3>🛋️ ${def.name}</h3>
+    box.innerHTML = `<div class="card"><h3>🛋️ ${esc(f.name || def.name)}</h3>
       <div class="grid2"><div><label>רוחב (ס"מ)</label><input id="fw" type="number" inputmode="numeric" value="${f.w}" ${ro ? 'disabled' : ''}></div>
         <div><label>עומק (ס"מ)</label><input id="fd" type="number" inputmode="numeric" value="${f.d}" ${ro ? 'disabled' : ''}></div></div>
       <label>📏 מרחק מהקירות (ס"מ) — אפשר להקליד מספר מדויק</label>
@@ -695,6 +699,85 @@ function clearances(f, pl) {
   return out;
 }
 
+
+// ---------------- 🤖 זיהוי תוכנית מתמונה (AI) ----------------
+// מצלמים / מעלים תוכנית (מודפסת, PDF או שרטוט בעיפרון). ה-AI מחזיר קירות ופתחים,
+// התמונה נשארת ברקע מתחת — כך רואים מיד איפה צריך לתקן.
+function aiPlanFromImage() {
+  if (P.showOriginal) return toast('במצב "לפני" אי אפשר לערוך');
+  if (!(S.settings.apiKey || '').trim()) return toast('צריך מפתח AI בהגדרות');
+  modal('🤖 זיהוי תוכנית מתמונה', `
+    <div class="muted">מתאים לתוכנית מודפסת, PDF, או שרטוט בעיפרון. כדי שהמידות ייצאו נכון — חשוב שתהיה כתובה על השרטוט לפחות מידה אחת (למשל אורך קיר).</div>
+    <div class="grid2" style="margin-top:10px"><button class="btn" id="apCam">📷 צילום</button><button class="btn sec" id="apGal">🖼️ תמונה / PDF</button></div>
+    <label>מידה ידועה (לא חובה — אם אין מידות כתובות)</label>
+    <input id="apKnown" placeholder="למשל: הקיר העליון 640 ס&quot;מ, או רוחב הדירה 9 מטר">
+    <div id="apOut" style="margin-top:10px"></div>`, (b, close) => {
+    const run = async (file) => {
+      if (!file) return; const out = $('#apOut', b);
+      out.innerHTML = '<div style="text-align:center"><div class="spinner"></div><span id="apSt">מכין את התמונה…</span></div>';
+      try {
+        const dataURL = (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) ? await pdfToImage(file) : await compressImage(file, 2000, 0.9);
+        const im = await new Promise((res, rej) => { const x = new Image(); x.onload = () => res(x); x.onerror = rej; x.src = dataURL; });
+        const W = im.width, H = im.height, known = $('#apKnown', b).value.trim();
+        const prompt = `You are an expert architectural drafter. Read this floor plan image (it may be a printed plan, CAD export, or a hand pencil sketch) and extract its geometry.
+Coordinates: use normalized image coordinates 0-1000 for x (left→right) and 0-1000 for y (top→bottom), measured on the wall CENTER LINES.
+Return ONLY JSON:
+{"walls":[{"x1":n,"y1":n,"x2":n,"y2":n,"kind":"exterior|interior|mamad","thick_cm":n}],
+ "openings":[{"wall":index,"kind":"door|window","t":0..1 position of the opening center along the wall from (x1,y1),"width_cm":n}],
+ "scale":{"x1":n,"y1":n,"x2":n,"y2":n,"cm":n} — ONE clearly written dimension in the drawing (its two end points in the same normalized coords and its real length in cm; convert meters to cm) or null,
+ "rooms":[{"name":"Hebrew room name if written","x":n,"y":n}],
+ "notes":"short Hebrew note about what was unclear"}
+Rules: include every wall segment (split walls at corners and T-junctions); straight walls should be exactly horizontal/vertical when they look so; exterior walls ~25cm, interior ~10cm, a safe room (ממ"ד) ~30cm; do not invent walls; ignore furniture, text and dimension lines as walls.${known ? '\nThe user says this known dimension: ' + known : ''}`;
+        const st = (m) => { const e = $('#apSt', b); if (e) e.textContent = m; };
+        st('ה-AI קורא את התוכנית…');
+        const h = dataURL.split(',');
+        const txt = await geminiText([{ text: prompt }, { inline_data: { mime_type: h[0].match(/data:(.*?);/)?.[1] || 'image/jpeg', data: h[1] } }], true, (m) => st('ה-AI קורא את התוכנית… ' + m), { timeout: 150000 });
+        let j; try { j = JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { throw new Error('התשובה של ה-AI לא הייתה תקינה. נסו שוב או צלמו ברור יותר.'); }
+        const walls0 = (j.walls || []).filter(w => [w.x1, w.y1, w.x2, w.y2].every(v => typeof v === 'number'));
+        if (!walls0.length) throw new Error('לא זוהו קירות בתמונה. נסו צילום ישר וברור יותר, עם קווים כהים.');
+        // קנה מידה: ס"מ לפיקסל
+        const px = (x, y) => ({ x: x / 1000 * W, y: y / 1000 * H });
+        let cmPerPx = null, scaleNote = '';
+        if (j.scale && j.scale.cm > 0) { const a = px(j.scale.x1, j.scale.y1), c = px(j.scale.x2, j.scale.y2), d = Math.hypot(c.x - a.x, c.y - a.y); if (d > 5) { cmPerPx = j.scale.cm / d; scaleNote = `קנה המידה נלקח מהמידה ${Math.round(j.scale.cm)} ס"מ שכתובה בשרטוט.`; } }
+        if (!cmPerPx) {
+          const m = known.match(/(\d+(?:\.\d+)?)\s*(מ|מטר|m)?/); let cm = m ? +m[1] * (m[2] || +m[1] < 30 ? 100 : 1) : 0;
+          const xs = walls0.flatMap(w => [w.x1, w.x2]); const spanPx = (Math.max(...xs) - Math.min(...xs)) / 1000 * W;
+          cmPerPx = (cm || 1000) / spanPx; scaleNote = cm ? `קנה המידה לפי מה שכתבת: הרוחב הכולל ${Math.round(cm)} ס"מ.` : '⚠️ לא נמצאה מידה — הנחתי שרוחב הדירה 10 מטר. כדאי לכייל: "📏 כיול קנה מידה".';
+        }
+        const T = { exterior: ['exterior', 25], interior: ['interior', 10], mamad: ['mamad', 30] };
+        let walls = walls0.map(w => { const a = px(w.x1, w.y1), c = px(w.x2, w.y2), [type, th] = T[w.kind] || T.interior;
+          return { id: 'w' + uid(), x1: a.x * cmPerPx, y1: a.y * cmPerPx, x2: c.x * cmPerPx, y2: c.y * cmPerPx, thick: Math.max(8, Math.min(40, Math.round(w.thick_cm || th))), type }; });
+        // יישור: כמעט אופקי/אנכי → ישר; חיבור קצוות קרובים
+        for (const w of walls) { const dx = w.x2 - w.x1, dy = w.y2 - w.y1; if (Math.abs(dy) < Math.abs(dx) * 0.09) { const y = (w.y1 + w.y2) / 2; w.y1 = w.y2 = y; } else if (Math.abs(dx) < Math.abs(dy) * 0.09) { const x = (w.x1 + w.x2) / 2; w.x1 = w.x2 = x; } }
+        const pts = walls.flatMap(w => [[w, 1], [w, 2]]);
+        for (let i = 0; i < pts.length; i++) for (let k = i + 1; k < pts.length; k++) {
+          const [a, ai] = pts[i], [c, ci] = pts[k]; const ax = a['x' + ai], ay = a['y' + ai], cx = c['x' + ci], cy = c['y' + ci];
+          if (Math.hypot(ax - cx, ay - cy) < 25) { const mx = (ax + cx) / 2, my = (ay + cy) / 2; a['x' + ai] = c['x' + ci] = mx; a['y' + ai] = c['y' + ci] = my; }
+        }
+        for (const w of walls) for (const k of ['x1', 'y1', 'x2', 'y2']) w[k] = Math.round(w[k]);
+        walls = walls.filter(w => len(w) > 20);
+        const openings = [];
+        for (const o of (j.openings || [])) {
+          const w = walls[o.wall]; if (!w || !(o.t >= 0 && o.t <= 1)) continue; const L = len(w), kind = o.kind === 'window' ? 'window' : 'door';
+          const d = OPENING_DEF[kind], width = Math.min(L - 10, Math.max(50, Math.round(o.width_cm || d.width))); if (width < 40) continue;
+          openings.push({ id: 'o' + uid(), wallId: w.id, kind, pos: Math.max(width / 2, Math.min(L - width / 2, o.t * L)), width, height: d.height, sill: d.sill });
+        }
+        if (P.plan.walls.length && !confirm(`זוהו ${walls.length} קירות ו-${openings.length} פתחים. להחליף את מה שכבר משורטט? (אפשר לבטל אחר כך ב-↶)`)) { out.innerHTML = ''; return; }
+        P.plan.walls = walls; P.plan.openings = openings;
+        if (P.plan.bg?.img) {} // הרקע הקודם נשאר במאגר — כדי שביטול יחזיר אותו
+        P.plan.bg = { img: await putImg(dataURL), w: W, h: H, scale: cmPerPx, x: 0, y: 0, opacity: 0.35 };
+        changed(); P.fitted = null; close(); rerender();
+        modal('✓ התוכנית זוהתה', `<div class="rule green"><span class="dot green"></span><div>${walls.length} קירות · ${openings.length} פתחים${(j.rooms || []).length ? ' · חדרים: ' + j.rooms.map(r => esc(r.name || '')).filter(Boolean).join(', ') : ''}</div></div>
+          <div class="muted" style="margin-top:8px">${esc(scaleNote)}</div>${j.notes ? `<div class="muted" style="margin-top:6px">📝 ${esc(j.notes)}</div>` : ''}
+          <div class="muted" style="margin-top:8px">התמונה המקורית מוצגת חלש מתחת לקירות — משווים ומתקנים: לוחצים על קיר כדי לשנות סוג/עובי, ↶ מבטל. כשהכל נראה טוב — "🏠 תלת־ממד".</div>
+          <button class="btn full" style="margin-top:10px" id="ap3d">🏠 לראות בתלת־ממד</button>`, (b2, c2) => { $('#ap3d', b2).onclick = () => { c2(); open3D(P.plan); }; });
+      } catch (e) { out.innerHTML = `<div class="rule red"><span class="dot red"></span><div>${esc(e.message)}</div></div>${typeof aiLogHtml === 'function' ? aiLogHtml() : ''}`; }
+    };
+    $('#apCam', b).onclick = async () => { const f = await pickFiles(false, true); run(f[0]); };
+    $('#apGal', b).onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*,application/pdf'; i.onchange = () => run(i.files[0]); i.click(); };
+  });
+}
+
 // ---------------- סרטוט רקע (תמונה / PDF) ----------------
 function pickBackground() {
   const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*,application/pdf';
@@ -779,11 +862,13 @@ async function open3D(plan) {
     <div style="position:absolute;top:calc(10px + var(--safe-t));right:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap;z-index:2">
       <button class="btn sm" id="x3">✕ סגירה</button>
       <button class="btn sec sm" id="mOrbit">🔄 מבט על</button><button class="btn sec sm" id="mWalk">🚶 הליכה</button>
-      <button class="btn sec sm" id="mMat">🎨 חומרים</button><button class="btn sec sm" id="mTour">🎬 סרטון סיור</button><button class="btn sec sm" id="mRec">⏺️ הקלטה</button>
+      <button class="btn sm" id="mAdd">➕ הוספה</button><button class="btn sec sm" id="mMat">🎨 חומרים</button><button class="btn sec sm" id="mTour">🎬 סרטון סיור</button><button class="btn sec sm" id="mRec">⏺️ הקלטה</button>
       ${plan.original ? '<button class="btn sec sm" id="mBA">לפני / אחרי</button>' : ''}</div>
     <div id="joy" style="position:absolute;bottom:calc(24px + var(--safe-b));left:24px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.35);border:2px solid rgba(255,255,255,.8);display:none;z-index:2;touch-action:none">
       <div id="joyK" style="position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:50%;background:rgba(80,60,40,.75)"></div></div>
     <div id="hint3" style="position:absolute;bottom:calc(28px + var(--safe-b));right:12px;max-width:52%;background:rgba(0,0,0,.55);color:#fff;padding:6px 10px;border-radius:10px;font-size:12px;display:none;z-index:2">עיגול שמאלי = ללכת · גרירה על המסך = להסתכל מסביב</div>
+    <div id="ed3" style="position:absolute;bottom:calc(10px + var(--safe-b));left:10px;right:10px;display:none;z-index:3;background:rgba(255,255,255,.95);border-radius:14px;padding:8px;box-shadow:0 2px 10px #0004;color:var(--ink)"></div>
+    <div id="placeHint" style="position:absolute;top:calc(100px + var(--safe-t));left:50%;transform:translateX(-50%);background:#a86b4a;color:#fff;padding:8px 14px;border-radius:20px;font-size:14px;display:none;z-index:3;white-space:nowrap"></div>
     <div id="recDot" style="position:absolute;top:calc(60px + var(--safe-t));left:12px;background:#c62828;color:#fff;padding:4px 10px;border-radius:12px;font-size:13px;display:none;z-index:2">● מקליט</div>
     <div id="ba3" class="lbl" style="position:absolute;top:calc(60px + var(--safe-t));right:10px;background:rgba(0,0,0,.6);color:#fff;padding:4px 10px;border-radius:8px;font-size:13px;display:none;z-index:2"></div>
     <div id="load3" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><div class="spinner"></div></div></div>`;
@@ -864,20 +949,39 @@ async function open3D(plan) {
     }
     return { cx: (minx + maxx) / 200, cz: (miny + maxy) / 200, size: Math.max(maxx - minx, maxy - miny) / 100, minx: minx / 100, maxx: maxx / 100, minz: miny / 100, maxz: maxy / 100 };
   }
-  function addFurniture(pl) {
+  const furnGroups = new Map(); // id → קבוצה בתלת־ממד
+  const spriteTex = {};
+  async function catTexture(f) {
+    const key = f.itemId; if (spriteTex[key]) return spriteTex[key];
+    const it = (typeof S !== 'undefined' ? S.catalog : []).find(x => x.id === f.itemId); if (!it) return null;
+    const src = (await getImg(it.img)) || it.th; if (!src) return null;
+    const cut = typeof cutoutWhite === 'function' ? await cutoutWhite(src, it.img) : src;
+    const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = cut; }); if (!img) return null;
+    const t = new THREE.Texture(img); t.needsUpdate = true; if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace; t.userData = { ar: img.height / img.width };
+    return (spriteTex[key] = t);
+  }
+  function placeGroup(g, f) { g.position.set(f.x / 100, (f.z || 0) / 100, f.y / 100); g.rotation.y = -(f.rot || 0) * Math.PI / 180; }
+  async function addFurniture(pl) {
+    furnGroups.clear();
     for (const f of (pl.furniture || [])) {
       const d = FURN[f.type]; if (!d) continue;
+      const g = new THREE.Group(); g.userData.fid = f.id; furnGroups.set(f.id, g);
+      if (f.type === 'catItem') {
+        const tex = await catTexture(f);
+        if (tex) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.08 })); const w = f.w / 100; sp.center.set(0.5, 0); sp.scale.set(w, w * tex.userData.ar, 1); sp.userData.fid = f.id; g.add(sp); }
+        placeGroup(g, f); g.rotation.y = 0; group.add(g); continue;
+      }
       const mat = new THREE.MeshStandardMaterial({ color: d.c3, roughness: 0.8 });
       const geo = d.round ? new THREE.CylinderGeometry(f.w / 200, f.w / 200, d.h / 100, 32) : new THREE.BoxGeometry(f.w / 100, d.h / 100, f.d / 100);
-      const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = mesh.receiveShadow = true; mesh.position.set(f.x / 100, d.h / 200, f.y / 100); mesh.rotation.y = -(f.rot || 0) * Math.PI / 180; group.add(mesh);
+      const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = mesh.receiveShadow = true; mesh.position.y = d.h / 200; mesh.userData.fid = f.id; g.add(mesh);
       if (d.chairs) { const cm = new THREE.MeshStandardMaterial({ color: 0x6f5a48, roughness: 0.8 });
         const pts = d.chairs === 6 ? [-1, 0, 1].flatMap(i => [[i * f.w / 3, -f.d / 2 - 15], [i * f.w / 3, f.d / 2 + 15]]) : [[0, -f.d / 2 - 15], [0, f.d / 2 + 15], [-f.w / 2 - 15, 0], [f.w / 2 + 15, 0]];
-        const a = (f.rot || 0) * Math.PI / 180;
-        for (const [lx, ly] of pts) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), cm); c.castShadow = true; c.position.set((f.x + lx * Math.cos(a) - ly * Math.sin(a)) / 100, 0.225, (f.y + lx * Math.sin(a) + ly * Math.cos(a)) / 100); group.add(c); }
+        for (const [lx, ly] of pts) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), cm); c.castShadow = true; c.position.set(lx / 100, 0.225, ly / 100); c.userData.fid = f.id; g.add(c); }
       }
+      placeGroup(g, f); group.add(g);
     }
   }
-  const build0 = build; build = async (pl) => { const r = await build0(pl); addFurniture(pl); return r; };
+  const build0 = build; build = async (pl) => { const r = await build0(pl); await addFurniture(pl); return r; };
   let info = await build(plan);
   const controls = new OrbitControls(camera, renderer.domElement);
   // ---- הליכה: ג'ויסטיק + גרירה להסתכלות + התנגשות בקירות (עוברים רק דרך דלתות) ----
@@ -904,7 +1008,7 @@ async function open3D(plan) {
   }
   // גרירה על המסך = סיבוב הראש
   let look = null;
-  renderer.domElement.addEventListener('pointerdown', e => { if (walking) { look = { id: e.pointerId, x: e.clientX, y: e.clientY }; } });
+  renderer.domElement.addEventListener('pointerdown', e => { if (walking && !drag3) { look = { id: e.pointerId, x: e.clientX, y: e.clientY }; } });
   renderer.domElement.addEventListener('pointermove', e => { if (!look || e.pointerId !== look.id) return; yaw += (e.clientX - look.x) * 0.005; pitch = Math.max(-1.2, Math.min(1.2, pitch + (e.clientY - look.y) * 0.004)); look.x = e.clientX; look.y = e.clientY; applyLook(); });
   const endLook = e => { if (look && e.pointerId === look.id) look = null; };
   renderer.domElement.addEventListener('pointerup', endLook); renderer.domElement.addEventListener('pointercancel', endLook);
@@ -943,6 +1047,76 @@ async function open3D(plan) {
     showing = showing === plan ? plan.original : plan; info = await build(showing);
     const l = $('#ba3', m); l.style.display = ''; l.textContent = showing === plan ? 'אחרי (תכנון)' : 'לפני (מצב קיים)';
   };
+  // ---- עריכה בתוך התלת־ממד: הוספה בנגיעה, בחירה, גרירה על הרצפה, סיבוב, גודל, מחיקה ----
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  let placing = null, sel3 = null, drag3 = null, tap0 = null;
+  const ED = $('#ed3', m), PH = $('#placeHint', m);
+  const setNdc = (e) => { const r = renderer.domElement.getBoundingClientRect(); ndc.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); };
+  const furnOf = (id) => (plan.furniture || []).find(x => x.id === id);
+  function hitFurn3(e) { setNdc(e); const hits = ray.intersectObjects([...furnGroups.values()], true); for (const h of hits) { let o = h.object; while (o && !o.userData.fid) o = o.parent; if (o) return { f: furnOf(o.userData.fid), point: h.point, obj: h.object }; } return null; }
+  function floorPoint(e) { setNdc(e); const p = new THREE.Vector3(); return ray.ray.intersectPlane(floorPlane, p) ? p : null; }
+  function select3(f) {
+    sel3 = f; furnGroups.forEach((g, id) => g.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(id === f?.id ? 0x553311 : 0); if (o.isSprite) o.material.color.setHex(id === f?.id ? 0xffe0c0 : 0xffffff); }));
+    if (!f) { ED.style.display = 'none'; return; }
+    const isCat = f.type === 'catItem';
+    ED.style.display = 'block'; ED.style.bottom = walking ? 'calc(150px + var(--safe-b))' : 'calc(10px + var(--safe-b))';
+    ED.innerHTML = `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><b style="flex:1;font-size:14px">${esc(f.name || FURN[f.type].name)}</b><span class="muted" style="font-size:12px">גוררים אותו באצבע כדי להזיז</span></div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:center">
+        ${isCat ? '' : '<button class="btn sec sm" data-e="r-15">⟲15°</button><button class="btn sec sm" data-e="r15">⟳15°</button><button class="btn sec sm" data-e="r90">⟳90°</button>'}
+        <button class="btn sec sm" data-e="s-">➖ קטן</button><button class="btn sec sm" data-e="s+">➕ גדול</button>
+        ${isCat ? '<button class="btn sec sm" data-e="z-">⬇️</button><button class="btn sec sm" data-e="z+">⬆️</button>' : ''}
+        <button class="btn sec sm" data-e="dup">⧉</button><button class="btn danger sm" data-e="del" style="padding:7px 10px">🗑️</button><button class="btn sm" data-e="ok">✓</button></div>
+      <div class="muted" style="font-size:12px;text-align:center;margin-top:4px">${isCat ? `גובה מהרצפה: ${Math.round(f.z || 0)} ס"מ · רוחב ${Math.round(f.w)} ס"מ` : `${Math.round(f.w)}×${Math.round(f.d)} ס"מ · ${Math.round(f.rot || 0)}°`}</div>`;
+    ED.querySelectorAll('[data-e]').forEach(b => b.onclick = async () => {
+      const a = b.dataset.e;
+      if (a === 'ok') return select3(null);
+      if (a === 'del') { plan.furniture = plan.furniture.filter(x => x !== f); changed(); select3(null); info = await build(showing); return; }
+      if (a === 'dup') { const n = { ...f, id: 'f' + uid(), x: f.x + 30, y: f.y + 30 }; plan.furniture.push(n); changed(); info = await build(showing); return select3(n); }
+      if (a[0] === 'r') f.rot = (((f.rot || 0) + +a.slice(1)) % 360 + 360) % 360;
+      if (a === 's+' || a === 's-') { const k = a === 's+' ? 1.1 : 1 / 1.1; f.w = Math.round(f.w * k); f.d = Math.round(f.d * k); }
+      if (a === 'z+' || a === 'z-') f.z = Math.max(0, (f.z || 0) + (a === 'z+' ? 5 : -5));
+      changed(); info = await build(showing); select3(f);
+    });
+  }
+  async function placeAt(e) {
+    const hit = hitFurn3(e), fp = floorPoint(e); if (!fp && !hit) return;
+    const P0 = hit ? hit.point : fp, def = FURN[placing.type];
+    let z = 0; if (placing.type === 'catItem' && hit && hit.f.type !== 'catItem') z = Math.round(hit.point.y * 100); // על שולחן / מזנון
+    const f = { id: 'f' + uid(), type: placing.type, x: Math.round(P0.x * 100), y: Math.round(P0.z * 100), rot: 0, w: placing.w || def.w, d: placing.d || def.d, ...(placing.extra || {}), z };
+    plan.furniture = plan.furniture || []; plan.furniture.push(f); placing = null; PH.style.display = 'none'; changed();
+    info = await build(showing); select3(f); toast(z ? `הונח על המשטח (${z} ס"מ)` : 'הונח');
+  }
+  $('#mAdd', m).onclick = () => {
+    if (showing !== plan) return toast('במצב "לפני" אי אפשר להוסיף');
+    const cat = (typeof S !== 'undefined' ? S.catalog : []).filter(x => !x.deleted && (x.img || x.th));
+    const cats = [...new Set(Object.values(FURN).map(f => f.cat))].filter(c => c !== '__hidden');
+    modal('➕ מה להוסיף?', `${cat.length ? `<h3>מהקטלוג שלך</h3><div class="muted">מוצר שנוגעים בו על שולחן — יונח על השולחן.</div><div class="thumbs">${cat.map(it => `<div class="t" data-ci="${it.id}" style="background:#fff"><img src="${it.th || ''}" style="object-fit:contain"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.65));color:#fff;font-size:10px;padding:10px 4px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}</div></div>`).join('')}</div>` : ''}
+      ${cats.map(c => `<h3 style="margin-top:10px">${c}</h3><div class="chips">${Object.entries(FURN).filter(([, f]) => f.cat === c).map(([k, f]) => `<span class="chip" data-fk="${k}">${f.name}</span>`).join('')}</div>`).join('')}`, (b, close) => {
+      const go = (pl, name) => { placing = pl; close(); select3(null); PH.textContent = `👆 נוגעים במקום שבו לשים: ${name}`; PH.style.display = 'block'; };
+      b.querySelectorAll('[data-fk]').forEach(el => el.onclick = () => go({ type: el.dataset.fk }, FURN[el.dataset.fk].name));
+      b.querySelectorAll('[data-ci]').forEach(el => el.onclick = () => {
+        const it = cat.find(x => x.id === el.dataset.ci), sub = it.sub || it.cat || '';
+        const w = /פמוט|אגרטל|נר|פסל|קערה|מגש/.test(sub + it.name) ? 25 : /מנור|תאור/.test(sub + it.name) ? 45 : /כיס|כורס|שידה|ספה|שולחן/.test(sub + it.name) ? 90 : 40;
+        go({ type: 'catItem', w, d: w, extra: { itemId: it.id, name: it.name } }, it.name);
+      });
+    });
+  };
+  // אירועי מגע על הקנבס (בנוסף לסיבוב המבט/המצלמה)
+  renderer.domElement.addEventListener('pointerdown', e => {
+    tap0 = { x: e.clientX, y: e.clientY, t: Date.now() };
+    if (sel3 && !placing) { const h = hitFurn3(e); if (h && h.f === sel3) { drag3 = { id: e.pointerId }; controls.enabled = false; look = null; renderer.domElement.setPointerCapture(e.pointerId); } }
+  }, true);
+  renderer.domElement.addEventListener('pointermove', e => {
+    if (!drag3 || e.pointerId !== drag3.id) return; e.stopImmediatePropagation();
+    const p = floorPoint(e); if (!p) return; sel3.x = Math.round(p.x * 100); sel3.y = Math.round(p.z * 100);
+    const g = furnGroups.get(sel3.id); if (g) placeGroup(g, sel3), sel3.type === 'catItem' && (g.rotation.y = 0);
+  }, true);
+  renderer.domElement.addEventListener('pointerup', async e => {
+    if (drag3 && e.pointerId === drag3.id) { drag3 = null; controls.enabled = !walking; changed(); select3(sel3); return; }
+    if (!tap0 || Math.hypot(e.clientX - tap0.x, e.clientY - tap0.y) > 8 || Date.now() - tap0.t > 450) return;
+    if (placing) return placeAt(e);
+    const h = hitFurn3(e); select3(h ? h.f : null);
+  }, true);
   // ---- חומרים ----
   $('#mMat', m).onclick = () => {
     const cat = (typeof S !== 'undefined' ? S.catalog : []).filter(x => !x.deleted && ['ריצוף', 'חיפוי קירות', 'משטחים'].includes(x.cat));
