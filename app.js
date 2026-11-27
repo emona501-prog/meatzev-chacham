@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -132,7 +132,10 @@ let V = { tab: 'projects', projectId: null, roomId: null, roomTab: 'design', cat
 const proj = (id) => S.projects.find(p => p.id === (id || V.projectId));
 const room = () => proj()?.rooms.find(r => r.id === V.roomId);
 
-function go(patch) { Object.assign(V, patch); if (V.tab !== 'catalog') { V.selMode = false; const sb = document.getElementById('selBar'); if (sb) sb.remove(); } render(); window.scrollTo(0, 0); }
+// ↩ היסטוריית ניווט: "חזור" תמיד מחזיר צעד אחד אחורה (גם כפתור החזרה של הטלפון)
+const NAV = []; const NAVK = ['tab', 'projectId', 'roomId', 'roomTab', 'planOpen', 'catFilter', 'subFilter'];
+const navSnap = () => Object.fromEntries(NAVK.map(k => [k, V[k]]));
+function go(patch) { const before = navSnap(); if (NAVK.some(k => k in patch && patch[k] !== V[k])) { NAV.push(before); if (NAV.length > 60) NAV.shift(); } Object.assign(V, patch); if (V.tab !== 'catalog') { V.selMode = false; const sb = document.getElementById('selBar'); if (sb) sb.remove(); } render(); window.scrollTo(0, 0); }
 // מעבר בתוך אותו מסך (למשל בחירת קטגוריה) — בלי לקפוץ למעלה
 async function stay(patch) { const y = window.scrollY; Object.assign(V, patch); await render(); window.scrollTo(0, y); requestAnimationFrame(() => window.scrollTo(0, y)); }
 
@@ -141,14 +144,28 @@ $('#tabs').addEventListener('click', e => {
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
   go({ tab: b.dataset.tab, projectId: null, roomId: null, planOpen: false });
 });
-$('#backBtn').onclick = () => {
-  if (V.planOpen) go({ planOpen: false }); else if (V.roomId) go({ roomId: null }); else if (V.projectId) go({ projectId: null });
-};
+function goBack() {
+  // קודם סוגרים את מה שפתוח מעל המסך (חלון, הגדלה, ספר, תלת־ממד…)
+  const top = [...document.querySelectorAll('.modal')].pop();
+  if (top) { top.querySelector('.top button')?.click(); if (top.isConnected) { const x = top.querySelector('#x3'); if (x) x.click(); else top.remove(); } return true; }
+  const zv = document.getElementById('zoomv'); if (zv) { zv.remove(); return true; }
+  const tv = document.getElementById('tryv'); if (tv) { tv.querySelector('#tX')?.click(); return true; }
+  const fb = document.getElementById('fbook'); if (fb) { fb.querySelector('#fbX')?.click(); return true; }
+  if (document.body.classList.contains('planfs')) { document.getElementById('fsExit')?.click(); return true; }
+  const prev = NAV.pop();
+  if (prev) { Object.assign(V, prev); render(); window.scrollTo(0, 0); return true; }
+  if (V.planOpen) { V.planOpen = false; render(); return true; } if (V.roomId) { V.roomId = null; render(); return true; } if (V.projectId) { V.projectId = null; render(); return true; }
+  return false;
+}
+$('#backBtn').onclick = () => goBack();
+// כפתור/מחוות "חזור" של הטלפון → צעד אחד אחורה באפליקציה (ולא יציאה)
+try { history.replaceState({ m: 1 }, ''); history.pushState({ m: 2 }, ''); } catch {}
+addEventListener('popstate', () => { const did = goBack(); try { history.pushState({ m: 2 }, ''); } catch {} if (!did) toast('אתם במסך הראשי'); });
 $('#helpBtn').onclick = showHelp;
 
 function setHeader(title, back) {
   $('#title').textContent = title;
-  $('#backBtn').style.display = back ? '' : 'none';
+  $('#backBtn').style.display = back || NAV.length ? '' : 'none';
 }
 
 async function render() {
@@ -715,6 +732,12 @@ function flipbook(list, start = 0, projectId = '') {
 // 📸 לנסות אצלי — מצלמים פינה בבית (או מצלמה חיה) ומניחים עליה מוצרים מהקטלוג
 // גרירה = הזזה · שתי אצבעות = הגדלה וסיבוב · הידית ↘ = הגדלה וסיבוב באצבע אחת
 const CUT_CACHE = {};
+// גזירה מוכנה מראש (שקופה, איכותית) אם יש למוצר — אחרת גזירה מהירה בטלפון
+async function itemCutout(it) {
+  if (it.cut) { const c = (await getImg(it.cut)) || (await Sync.fetchImg(it.cut)); if (c) return c; }
+  const src = (await getImg(it.img)) || (await Sync.fetchImg(it.img)) || it.th; if (!src) return null;
+  return cutoutWhite(src, it.img);
+}
 async function cutoutWhite(src, key) { // מסיר רקע לבן מהקצוות פנימה (המוצר עצמו נשמר גם אם יש בו לבן)
   if (key && CUT_CACHE[key]) return CUT_CACHE[key];
   const im = await loadImg(src), sc = Math.min(1, 900 / Math.max(im.width, im.height));
@@ -725,8 +748,9 @@ async function cutoutWhite(src, key) { // מסיר רקע לבן מהקצוות 
   for (let i = 0; i < W; i++) st.push(i, (H - 1) * W + i); for (let j = 0; j < H; j++) st.push(j * W, j * W + W - 1);
   while (st.length) { const k = st.pop(); if (seen[k]) continue; seen[k] = 1; if (!bgish(k * 4)) { seen[k] = 2; continue; } p[k * 4 + 3] = 0; const xx = k % W, yy = (k / W) | 0;
     if (xx > 0) st.push(k - 1); if (xx < W - 1) st.push(k + 1); if (yy > 0) st.push(k - W); if (yy < H - 1) st.push(k + W); }
-  for (let k = 0; k < W * H; k++) if (seen[k] === 2) { // ריכוך קצה: פיקסל גבול בהיר מקבל שקיפות חלקית
-    const i = k * 4, lum = Math.min(p[i], p[i + 1], p[i + 2]); if (lum > 200) p[i + 3] = Math.round(255 * Math.min(1, (255 - lum) / 55 + .35)); }
+  for (let k = 0; k < W * H; k++) if (seen[k] === 2) { // קצה: מפרידים את הלבן מהצבע (בלי "הילה" לבנה)
+    const i = k * 4, mn = Math.min(p[i], p[i + 1], p[i + 2]), a = Math.min(1, Math.max(0.15, (255 - mn) / 255 * 1.6));
+    if (a < 1) { for (let c = 0; c < 3; c++) p[i + c] = Math.max(0, Math.min(255, (p[i + c] - (1 - a) * 255) / a)); p[i + 3] = Math.round(255 * a); } }
   x.putImageData(d, 0, 0);
   // חיתוך לגבולות המוצר
   let x0 = W, y0 = H, x1 = 0, y1 = 0; for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) if (p[(yy * W + xx) * 4 + 3] > 20) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; if (yy > y1) y1 = yy; }
@@ -820,8 +844,7 @@ function tryAtHome(startIds = []) {
   }
   async function addStk(it, from) {
     if (!wrap) { toast('קודם מצלמים או בוחרים תמונה של המקום'); return; }
-    const src = (await getImg(it.img)) || (await Sync.fetchImg(it.img)) || it.th; if (!src) return toast('אין תמונה למוצר הזה');
-    const cut = await cutoutWhite(src, it.img);
+    const cut = await itemCutout(it); if (!cut) return toast('אין תמונה למוצר הזה');
     const el = document.createElement('div'); el.className = 'stk'; el.innerHTML = `<img src="${cut}"><div class="hd">↘</div>`;
     const t = from ? { ...from, el, x: Math.min(.9, from.x + .06) } : { id: it.id, it, el, x: .5, y: .55, w: .28, rot: 0, flip: false, light: 100, shadow: 55 };
     wrap.appendChild(el); stks.push(t); await new Promise(r => { const i = el.querySelector('img'); i.complete ? r() : i.onload = r; }); place(t); selectStk(t); bindStk(t);

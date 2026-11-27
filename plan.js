@@ -1204,8 +1204,7 @@ async function open3D(plan) {
   async function catTexture(f) {
     const key = f.itemId; if (spriteTex[key]) return spriteTex[key];
     const it = (typeof S !== 'undefined' ? S.catalog : []).find(x => x.id === f.itemId); if (!it) return null;
-    const src = (await getImg(it.img)) || it.th; if (!src) return null;
-    const cut = typeof cutoutWhite === 'function' ? await cutoutWhite(src, it.img) : src;
+    const cut = typeof itemCutout === 'function' ? await itemCutout(it) : ((await getImg(it.img)) || it.th); if (!cut) return null;
     const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = cut; }); if (!img) return null;
     const t = new THREE.Texture(img); t.needsUpdate = true; if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace; t.userData = { ar: img.height / img.width };
     return (spriteTex[key] = t);
