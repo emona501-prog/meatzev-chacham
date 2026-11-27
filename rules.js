@@ -197,3 +197,18 @@ window.BED_SIZES = [
   { name: 'זוגית גדולה', size: '160 × 200' },
   { name: 'קינג סייז', size: '180 × 200' }
 ];
+
+// =====================================================================
+// 📐 כללי שרטוט — מקור אחד לכל האפליקציה (שרטוט, תלת־ממד, אזהרות וה-AI)
+// רמה לכל פעולה: red = אסור · orange = מותר עם אזהרה · green = מותר
+window.PLAN_RULES = {
+  walls: {
+    mamad:    { name: 'קיר ממ"ד',        open: 'orange', extra: 'red',    change: 'red',    remove: 'red',    maxDoors: 1, maxWindows: 1 },
+    bearing:  { name: 'קיר נושא',        open: 'orange', change: 'orange', remove: 'orange' },
+    exterior: { name: 'קיר חיצוני',      open: 'orange', change: 'orange', remove: 'orange' },
+    unknown:  { name: 'קיר לא מאומת',    open: 'orange', change: 'orange', remove: 'orange' },
+    interior: { name: 'קיר פנימי (גבס/בלוק)', open: 'green', change: 'green', remove: 'green' }
+  },
+  furn: { bedSide: 60, bedFront: 80, dining: 90, island: 90, islandMax: 120, wardrobeFront: 60 },
+  open: { doorW: 90, doorH: 210, winW: 120, winH: 120, winSill: 90 }
+};

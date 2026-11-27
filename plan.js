@@ -22,10 +22,10 @@ const OPENING_TIPS = {
   pivot: 'דלת פיבוט: יושבת על ציר מרכזי. מתאימה לדלת גדולה, בדרך כלל בכניסה.',
   fixed: 'חלון קבוע: לא נפתח.'
 };
-const OPENING_DEF = {
-  door:   { name: 'דלת', width: 90, height: 210, sill: 0 },
-  window: { name: 'חלון', width: 120, height: 120, sill: 90 }
-};
+const OPENING_DEF = new Proxy({}, { get(_, k) { const o = (typeof PR === 'function' ? PR().open : window.PLAN_RULES.open); return ({
+  door:   { name: 'דלת', width: o.doorW, height: o.doorH, sill: 0 },
+  window: { name: 'חלון', width: o.winW, height: o.winH, sill: o.winSill }
+})[k]; } });
 
 // ---------------- ספריית ריהוט וסניטריה (מידות מחוברת הקורס) ----------------
 // w = רוחב, d = עומק (ס"מ). הצד האחורי למעלה (y=0), החזית למטה (y=d). h = גובה לתלת־ממד.
@@ -78,14 +78,21 @@ function chairSvgSide(x, cy, right) {
   const cw = 45, cd = 50, x0 = right ? x - 18 : x - cw + 18;
   return `<g stroke-dasharray="3 2">${R(x0, cy - cd / 2, cw, cd, 3)}</g>` + R(right ? x0 + cw : x0 - 7, cy - cd / 2, 7, cd);
 }
-// כללי מרווח לריהוט (מהקורס)
-const FURN_RULES = {
-  bed2: { sides: [['ימין', 60], ['שמאל', 60]], front: 80, msg: 'בין מיטה לקיר 60–70 ס"מ; מול המיטה כ-80 ס"מ.' },
-  bed1: { sides: [['צד', 60]], anySide: true, front: 80, msg: 'מיטת יחיד יכולה להיצמד לקיר מצד אחד; בצד הפתוח 60 ס"מ, מול המיטה 80.' },
-  dining6: { all: 90, msg: '90 ס"מ בין השולחן לקיר.' }, dining4sq: { all: 90, msg: '90 ס"מ בין השולחן לקיר (גם מהפינות).' },
-  dining4r: { all: 90, msg: '90 ס"מ בין השולחן לקיר.' }, island: { all: 90, maxAll: 120, msg: 'מרווח סביב אי 90–120 ס"מ.' },
-  wardrobe: { front: 60, msg: 'צריך מקום לפתיחת דלתות הארון מלפנים.' }
-};
+// 📐 כללי השרטוט נקראים תמיד מספר הכללים (לשונית "כללים") — שינוי שם חל כאן מיד
+function PR() {
+  const base = window.PLAN_RULES, c = (typeof S !== 'undefined' && S.custom && S.custom.plan) || {};
+  const walls = {}; for (const k of Object.keys(base.walls)) walls[k] = { ...base.walls[k], ...((c.walls || {})[k] || {}) };
+  return { walls, furn: { ...base.furn, ...(c.furn || {}) }, open: { ...base.open, ...(c.open || {}) } };
+}
+const WR = (w) => PR().walls[w.type || 'unknown'] || PR().walls.unknown;
+// כללי מרווח לריהוט — המספרים מספר הכללים
+const FURN_RULES = new Proxy({}, { get(_, k) { const f = PR().furn; return ({
+  bed2: { sides: [['ימין', f.bedSide], ['שמאל', f.bedSide]], front: f.bedFront, msg: `בין מיטה לקיר ${f.bedSide} ס"מ; מול המיטה ${f.bedFront} ס"מ.` },
+  bed1: { sides: [['צד', f.bedSide]], anySide: true, front: f.bedFront, msg: `מיטת יחיד יכולה להיצמד לקיר מצד אחד; בצד הפתוח ${f.bedSide} ס"מ, מול המיטה ${f.bedFront}.` },
+  dining6: { all: f.dining, msg: `${f.dining} ס"מ בין השולחן לקיר.` }, dining4sq: { all: f.dining, msg: `${f.dining} ס"מ בין השולחן לקיר (גם מהפינות).` },
+  dining4r: { all: f.dining, msg: `${f.dining} ס"מ בין השולחן לקיר.` }, island: { all: f.island, maxAll: f.islandMax, msg: `מרווח סביב אי ${f.island}–${f.islandMax} ס"מ.` },
+  wardrobe: { front: f.wardrobeFront, msg: 'צריך מקום לפתיחת דלתות הארון מלפנים.' }
+})[k]; } });
 
 const P = {
   p: null, plan: null, svg: null, g: null, tool: 'select', sel: null,
@@ -106,25 +113,19 @@ const len = (w) => Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
 const fmt = (n) => Math.round(n);
 
 // ---------------- כללים ----------------
+const LVL_MSG = { red: 'אסור לפי ספר הכללים', orange: 'לפי ספר הכללים — מותר עם אזהרה' };
+function ruleOf(level, msg) { return level === 'green' || !level ? null : { level, msg }; }
 function openingRule(w, kind) {
-  const n = kind === 'door' ? 'דלת' : 'חלון';
-  if (w.type === 'mamad') { // לממ"ד יש דלת הדף וחלון הדף מקוריים — מותר לסמן אותם, אסור לפרוץ חדשים
-    const has = (P.plan?.openings || []).some(o => o.wallId === w.id && o.kind === kind);
-    if (has) return { level: 'red', msg: `בקיר הממ"ד הזה כבר מסומן${kind === 'door' ? 'ת דלת' : ' חלון'}. אסור לפרוץ ${n} נוספ${kind === 'door' ? 'ת' : ''} בקיר ממ"ד.` };
-    return { level: 'orange', msg: `מסמנים את ה${n} המקורי${kind === 'door' ? 'ת' : ''} של הממ"ד (${kind === 'door' ? 'דלת הדף' : 'חלון הדף'})? בממ"ד מותר רק לסמן את הפתחים הקיימים — אסור לפרוץ, להרחיב או להזיז אותם.` };
+  const n = kind === 'door' ? 'דלת' : 'חלון', r = WR(w), nm = r.name;
+  if (w.type === 'mamad') {
+    const cnt = (P.plan?.openings || []).filter(o => o.wallId === w.id && o.kind === kind).length, max = kind === 'door' ? r.maxDoors : r.maxWindows;
+    if (cnt >= max) return ruleOf(r.extra, r.extra === 'red' ? `בקיר הממ"ד הזה כבר יש ${cnt} ${kind === 'door' ? 'דלתות' : 'חלונות'} (המקסימום בספר הכללים: ${max}). אסור להוסיף עוד.` : `מעבר למקסימום שבספר הכללים (${max}). להוסיף בכל זאת?`);
+    return ruleOf(r.open, r.open === 'red' ? `ספר הכללים אוסר פתחים בקיר ממ"ד.` : `מסמנים ${n} בקיר ממ"ד (פתח מקורי — דלת/חלון הדף)? אסור לפרוץ, להרחיב או להזיז אותם.`);
   }
-  if (w.type === 'bearing') return { level: 'orange', msg: `זה קיר נושא. פריצת ${n} מחייבת אישור קונסטרוקטור. להוסיף לסקיצה בכל זאת?` };
-  if (w.type === 'exterior') return { level: 'orange', msg: `זה קיר חיצוני. שינוי בחזית דורש היתר. להוסיף לסקיצה בכל זאת?` };
-  if (w.type === 'unknown') return { level: 'orange', msg: `הקיר לא מאומת — לא ידוע אם הוא נושא. כדאי לבדוק עם קונסטרוקטור. להוסיף בכל זאת?` };
-  return null;
+  return ruleOf(r.open, r.open === 'red' ? `ספר הכללים אוסר פתיחת ${n} ב${nm}.` : `זה ${nm}. ${w.type === 'bearing' ? 'פריצה מחייבת אישור קונסטרוקטור.' : w.type === 'exterior' ? 'שינוי בחזית דורש היתר.' : 'כדאי לבדוק עם קונסטרוקטור.'} להוסיף ${n} לסקיצה בכל זאת?`);
 }
-function deleteRule(w) {
-  if (w.type === 'mamad') return { level: 'red', msg: 'אסור להרוס או לקצר קיר ממ"ד.' };
-  if (w.type === 'bearing') return { level: 'orange', msg: 'זה קיר נושא. הריסה מחייבת קונסטרוקטור והיתר. למחוק מהסקיצה בכל זאת?' };
-  if (w.type === 'exterior') return { level: 'orange', msg: 'זה קיר חיצוני. שינוי בחזית דורש היתר. למחוק בכל זאת?' };
-  if (w.type === 'unknown') return { level: 'orange', msg: 'הקיר לא מאומת. אם הוא נושא — אסור להרוס בלי קונסטרוקטור. למחוק בכל זאת?' };
-  return null;
-}
+function deleteRule(w) { const r = WR(w); return ruleOf(r.remove, r.remove === 'red' ? `ספר הכללים אוסר להרוס ${r.name}.` : `זה ${r.name}. הריסה מחייבת בדיקה${w.type === 'bearing' ? ' של קונסטרוקטור והיתר' : ''}. למחוק מהסקיצה בכל זאת?`); }
+function changeRule(w) { const r = WR(w); return ruleOf(r.change, r.change === 'red' ? `ספר הכללים אוסר להזיז או לשנות ${r.name}.` : `⚠️ ${r.name} — שינוי מחייב בדיקה של איש מקצוע.`); }
 function checkRule(r) {
   if (!r) return true;
   if (r.level === 'red') { alertBox(r); return false; }
@@ -534,10 +535,10 @@ function bindPointer() {
       if (rf) Object.assign(P.gesture, { type: 'rot', f: rf });
       else { const f = hitFurn(pt); if (f) { const was = P.sel?.kind === 'furn' && P.sel.id === f.id; P.sel = { kind: 'furn', id: f.id }; if (!was) { draw(); renderProps(); } Object.assign(P.gesture, { type: 'drag', f, ox: f.x - pt.x, oy: f.y - pt.y }); }
         else { const he = hitWallEnd(pt);
-          if (he) { if (he.w.type === 'mamad') toast('קיר ממ"ד — אסור להזיז'); else Object.assign(P.gesture, { type: 'wend', w: he.w, end: he.end, links: linkedEnds(he.w, he.end) }); }
+          if (he) { const cr = changeRule(he.w); if (cr?.level === 'red') toast(cr.msg); else Object.assign(P.gesture, { type: 'wend', w: he.w, end: he.end, links: linkedEnds(he.w, he.end) }); }
           else if (!hitOpening(pt)) { const h = hitWall(pt); if (h) {
             const was = P.sel?.kind === 'wall' && P.sel.id === h.w.id; P.sel = { kind: 'wall', id: h.w.id }; if (!was) { draw(); renderProps(); }
-            if (h.w.type !== 'mamad') Object.assign(P.gesture, { type: 'wmove', w: h.w, px: pt.x, py: pt.y, ox: 0, oy: 0, links: [...linkedEnds(h.w, 1), ...linkedEnds(h.w, 2)] });
+            if (changeRule(h.w)?.level !== 'red') Object.assign(P.gesture, { type: 'wmove', w: h.w, px: pt.x, py: pt.y, ox: 0, oy: 0, links: [...linkedEnds(h.w, 1), ...linkedEnds(h.w, 2)] });
           } }
         } }
     }
@@ -584,11 +585,11 @@ function bindPointer() {
       if (poly.length < 6) { draw(); return toast('מקיפים באצבע את האזור העקום'); }
       const inside = P.plan.walls.filter(w => pointInPoly({ x: w.x1, y: w.y1 }, poly) || pointInPoly({ x: w.x2, y: w.y2 }, poly) || pointInPoly({ x: (w.x1 + w.x2) / 2, y: (w.y1 + w.y2) / 2 }, poly));
       if (!inside.length) { draw(); return toast('לא נמצאו קירות בתוך העיגול'); }
-      if (inside.some(w => w.type === 'mamad')) toast('קירות ממ"ד לא זזים — מיישר רק את השאר');
-      const n = straighten(inside.filter(w => w.type !== 'mamad')); changed(); draw(); renderProps(); toast(`🪄 יושרו ${n} קירות · אפשר לבטל ב-↶`); return;
+      if (inside.some(w => changeRule(w)?.level === 'red')) toast('קירות שספר הכללים אוסר לשנות לא זזים — מיישר רק את השאר');
+      const n = straighten(inside.filter(w => changeRule(w)?.level !== 'red')); changed(); draw(); renderProps(); toast(`🪄 יושרו ${n} קירות · אפשר לבטל ב-↶`); return;
     }
     if (g.type === 'draw' && P.cursor) return commitPoint(P.cursor);
-    if (g.type === 'wmove' || g.type === 'wend') { if (g.moved) { if (g.w.type === 'bearing') toast('⚠️ קיר נושא — שינוי מחייב קונסטרוקטור'); changed(); } draw(); renderProps(); return; }
+    if (g.type === 'wmove' || g.type === 'wend') { if (g.moved) { const cr = changeRule(g.w); if (cr) toast(cr.msg); changed(); } draw(); renderProps(); return; }
     if (g.type === 'drag' || g.type === 'rot') { if (g.moved) { changed(); draw(); renderProps(); } else if (g.type === 'drag') { draw(); renderProps(); } return; }
     if (g.type === 'tap' && !g.moved) onTap(toWorld(e.clientX, e.clientY));
   };
@@ -778,11 +779,11 @@ function renderFBar() {
   if (P.tool === 'magic' && !P.showOriginal) {
     bar.style.display = 'flex';
     bar.innerHTML = `<div class="muted" style="width:100%;text-align:center;font-size:12px">מקיפים באצבע את האזור העקום ✍️</div><button class="btn sm" id="mgAll">🪄 יישור כל התוכנית</button><button class="btn sec sm" id="mgX">✓ סיום</button>`;
-    $('#mgAll', bar).onclick = () => { const n = straighten(P.plan.walls.filter(w => w.type !== 'mamad')); changed(); draw(); toast(`🪄 יושרו ${n} קירות · אפשר לבטל ב-↶`); };
+    $('#mgAll', bar).onclick = () => { const n = straighten(P.plan.walls.filter(w => changeRule(w)?.level !== 'red')); changed(); draw(); toast(`🪄 יושרו ${n} קירות · אפשר לבטל ב-↶`); };
     $('#mgX', bar).onclick = () => setTool('select');
     return;
   }
-  if (wsel && wsel.type !== 'mamad') {
+  if (wsel && changeRule(wsel)?.level !== 'red') {
     bar.style.display = 'flex';
     bar.innerHTML = `<button class="btn sec sm" data-n="0,-1">▲</button><button class="btn sec sm" data-n="0,1">▼</button><button class="btn sec sm" data-n="1,0">▶</button><button class="btn sec sm" data-n="-1,0">◀</button><button class="btn sec sm" id="wcopy">⧉ העתקה</button><button class="btn sm" id="fok">✓</button>
       <div class="muted" style="width:100%;text-align:center;font-size:11px">גוררים את הקיר (✥) להזזה · גוררים עיגול בקצה לשינוי אורך וכיוון · חצים = ס"מ אחד</div>`;
@@ -865,10 +866,9 @@ function renderProps() {
       <label>סוג הקיר</label><select id="wt" ${ro ? 'disabled' : ''}>${Object.entries(WALL_TYPES).map(([k, v]) => `<option value="${k}" ${w.type === k ? 'selected' : ''}>${v.name}</option>`).join('')}</select>
       <div class="grid2"><div><label>אורך (ס"מ)</label><input id="wl" type="number" inputmode="numeric" value="${fmt(len(w))}" ${ro ? 'disabled' : ''}></div>
         <div><label>עובי (ס"מ)</label><input id="wk" type="number" inputmode="numeric" value="${w.thick}" ${ro ? 'disabled' : ''}></div></div>
-      <div class="grid2"><div><label>זווית (°)</label><input id="wa" type="number" inputmode="numeric" value="${Math.round(((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI) + 360) % 360)}" ${ro || w.type === 'mamad' ? 'disabled' : ''}></div><div></div></div>
+      <div class="grid2"><div><label>זווית (°)</label><input id="wa" type="number" inputmode="numeric" value="${Math.round(((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI) + 360) % 360)}" ${ro || changeRule(w)?.level === 'red' ? 'disabled' : ''}></div><div></div></div>
       ${ro ? '' : '<div class="muted" style="margin-top:6px">✥ גוררים את הקיר להזזה · העיגולים בקצוות = שינוי אורך וכיוון (נצמד לישר ולקירות אחרים) · קירות מחוברים זזים איתו</div>'}
-      ${w.type === 'mamad' ? '<div class="rule red" style="margin-top:8px"><span class="dot red"></span><div>קיר ממ"ד — אסור לפרוץ, לקצר או להרוס.</div></div>' : ''}
-      ${w.type === 'bearing' ? '<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div>קיר נושא — כל שינוי מחייב קונסטרוקטור.</div></div>' : ''}
+      ${(() => { const r = WR(w), L = { red: 'אסור', orange: 'באזהרה', green: 'מותר' }; return r.open === 'green' && r.change === 'green' && r.remove === 'green' ? '' : `<div class="rule ${[r.open, r.change, r.remove].includes('red') ? 'red' : 'orange'}" style="margin-top:8px"><span class="dot ${[r.open, r.change, r.remove].includes('red') ? 'red' : 'orange'}"></span><div>${esc(r.name)} לפי ספר הכללים: פתח — ${L[r.open]} · הזזה/שינוי — ${L[r.change]} · הריסה — ${L[r.remove]}</div></div>`; })()}
       ${w.type === 'unknown' ? '<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div>לא ידוע אם הקיר נושא. כדאי לבדוק ולסמן.</div></div>' : ''}
       ${ro ? '' : '<div class="grid2" style="margin-top:10px"><button class="btn sec" id="wcp">⧉ העתקת קיר</button><button class="btn danger" id="wdel">מחיקת הקיר</button></div>'}</div>`;
     if (ro) return;
@@ -885,8 +885,7 @@ function renderProps() {
     };
     $('#wl').onchange = e => {
       const nl = +e.target.value; if (!(nl > 0)) return;
-      if (w.type === 'mamad') { alertBox({ msg: 'אסור לקצר או להאריך קיר ממ"ד.' }); e.target.value = fmt(len(w)); return; }
-      if (w.type === 'bearing' && !confirm('⚠️ זה קיר נושא. שינוי אורך מחייב קונסטרוקטור. להמשיך בסקיצה?')) { e.target.value = fmt(len(w)); return; }
+      { const cr = changeRule(w); if (cr && !checkRule(cr.level === 'red' ? cr : { level: 'orange', msg: cr.msg.replace('⚠️ ', '') + ' להמשיך בסקיצה?' })) { e.target.value = fmt(len(w)); return; } }
       const L = len(w), ox = w.x2, oy = w.y2;
       w.x2 = w.x1 + (w.x2 - w.x1) / L * nl; w.y2 = w.y1 + (w.y2 - w.y1) / L * nl;
       for (const o of P.plan.walls) if (o !== w) { if (Math.abs(o.x1 - ox) < 1 && Math.abs(o.y1 - oy) < 1) { o.x1 = w.x2; o.y1 = w.y2; } if (Math.abs(o.x2 - ox) < 1 && Math.abs(o.y2 - oy) < 1) { o.x2 = w.x2; o.y2 = w.y2; } }
@@ -920,7 +919,7 @@ function renderProps() {
     if ($('#oflip')) $('#oflip').onclick = () => { o.flip = !o.flip; upd(); };
     $('#ost').onchange = e => { o.style = e.target.value; upd(); };
     $('#odel').onclick = () => {
-      if ((w.type === 'mamad') && !confirm('זה פתח בקיר ממ"ד (כנראה החלון/הדלת המקוריים של הממ"ד). אסור לשנות אותם. למחוק מהסקיצה בכל זאת?')) return;
+      if (w.type === 'mamad' && WR(w).change !== 'green' && !confirm('זה פתח בקיר ממ"ד (כנראה החלון/הדלת המקוריים של הממ"ד). לפי ספר הכללים אסור לשנות אותם. למחוק מהסקיצה בכל זאת?')) return;
       P.plan.openings = P.plan.openings.filter(x => x !== o); P.sel = null; upd();
     };
   }

@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.6';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -1265,7 +1265,7 @@ async function aiPromptHelper(r, sel, ins, items, baseImg, refs = []) {
   const c = catOf(r.cat);
   const own = R().checks[r.cat] || [];
   const checks = [...own, ...R().checks._all.filter(x => !own.some(y => y.key === x.key))];
-  const fixed = [...(R().fixed[r.cat] || []), ...R().fixed._all];
+  const fixed = [...(R().fixed[r.cat] || []), ...R().fixed._all, ...planRuleLines()];
   const rules = [...fixed.map(f => `- [${f.level}] ${f.text}`), ...checks.map(ch => `- [${ch.level}] ${ch.label}: ${ch.min != null ? 'min ' + ch.min : ''}${ch.max != null ? ' max ' + ch.max : ''} cm — ${ch.msg}`)].join('\n');
   const sys = `You are a senior interior designer and an expert prompt engineer for Google Gemini image editing ("Nano Banana").
 The user is an Israeli interior-design student. She uploads a real photo of a room and describes in Hebrew what she wants.
@@ -1427,7 +1427,7 @@ function evalCheck(ch, v) {
 function renderChecksTab(body, p, r) {
   const own = R().checks[r.cat] || [];
   const checks = [...own, ...R().checks._all.filter(c => !own.some(x => x.key === c.key))];
-  const fixed = [...(R().fixed[r.cat] || []), ...R().fixed._all];
+  const fixed = [...(R().fixed[r.cat] || []), ...R().fixed._all, ...planRuleLines()];
   const roomChecks = r.cat === 'corridor' && r.W ? `<div class="muted">רוחב החדר שהוגדר: ${r.W} ס"מ</div>` : '';
   body.innerHTML = `
     <div class="card"><h3>📏 בדיקת מידות</h3>${roomChecks}
@@ -2123,6 +2123,41 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 // =====================================================================
 // כללים (ספר הכללים)
 // =====================================================================
+// 📐 כללי שרטוט — מתוך ספר הכללים; חלים על השרטוט, התלת־ממד, האזהרות וה-AI
+function planRulesNow() { const b = window.PLAN_RULES, c = (S.custom && S.custom.plan) || {}; const walls = {}; for (const k of Object.keys(b.walls)) walls[k] = { ...b.walls[k], ...((c.walls || {})[k] || {}) }; return { walls, furn: { ...b.furn, ...(c.furn || {}) }, open: { ...b.open, ...(c.open || {}) } }; }
+function planRuleLines() { // אותם כללים בדיוק — גם להנחיות ה-AI
+  const p = planRulesNow(), L = { red: 'אסור', orange: 'מותר רק עם בדיקה של איש מקצוע', green: 'מותר' }, out = [];
+  out.push({ level: 'orange', text: 'כללי השרטוט הבאים הם העדכניים — אם הם סותרים כלל אחר, הם גוברים.' });
+  for (const [k, r] of Object.entries(p.walls)) {
+    const worst = [r.open, r.change, r.remove].includes('red') ? 'red' : [r.open, r.change, r.remove].includes('orange') ? 'orange' : 'green';
+    out.push({ level: worst, text: `${r.name}: פתיחת פתח — ${L[r.open]}; הזזה/שינוי — ${L[r.change]}; הריסה — ${L[r.remove]}.${k === 'mamad' ? ` עד ${r.maxDoors} דלת ו-${r.maxWindows} חלון בכל קיר; מעבר לזה — ${L[r.extra]}.` : ''}` });
+  }
+  const f = p.furn; out.push({ level: 'green', text: `מרווחים: ${f.bedSide} ס"מ בצדי מיטה, ${f.bedFront} ס"מ מול מיטה, ${f.dining} ס"מ סביב שולחן אוכל, ${f.island}–${f.islandMax} ס"מ סביב אי, ${f.wardrobeFront} ס"מ מול ארון.` });
+  out.push({ level: 'green', text: `ברירת מחדל: דלת ${p.open.doorW}×${p.open.doorH} ס"מ, חלון ${p.open.winW}×${p.open.winH} ס"מ בגובה ${p.open.winSill} ס"מ מהרצפה.` });
+  return out;
+}
+function planRulesCard(ed) {
+  const p = planRulesNow(), L = { red: '🔴 אסור', orange: '🟠 באזהרה', green: '🟢 מותר' };
+  const sel = (k, act, v) => `<select data-pw="${k}|${act}" style="padding:6px;width:auto">${['red', 'orange', 'green'].map(l => `<option value="${l}" ${v === l ? 'selected' : ''}>${L[l]}</option>`).join('')}</select>`;
+  const num = (grp, k, v, label) => `<div><label>${label}</label><input type="number" inputmode="numeric" data-pn="${grp}|${k}" value="${v}" ${ed ? '' : 'disabled'}></div>`;
+  return `<div class="card"><h3>📐 כללי שרטוט — חלים על השרטוט, התלת־ממד, האזהרות וה-AI</h3>
+    <div class="muted" style="margin-bottom:8px">כל שינוי כאן חל מיד בכל האפליקציה (וגם אצל השותפים במאגר).</div>
+    ${Object.entries(p.walls).map(([k, r]) => `<div class="rule ${[r.open, r.change, r.remove].includes('red') ? 'red' : [r.open, r.change, r.remove].includes('orange') ? 'orange' : 'green'}"><span class="dot ${[r.open, r.change, r.remove].includes('red') ? 'red' : [r.open, r.change, r.remove].includes('orange') ? 'orange' : 'green'}"></span><div class="grow"><b>${esc(r.name)}</b>
+      ${ed ? `<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:6px"><span>פתיחת פתח</span>${sel(k, 'open', r.open)}<span>הזזה / שינוי</span>${sel(k, 'change', r.change)}<span>הריסה</span>${sel(k, 'remove', r.remove)}
+        ${k === 'mamad' ? `<span>מקס׳ דלתות בקיר</span><input type="number" data-pm="maxDoors" value="${r.maxDoors}" style="width:70px"><span>מקס׳ חלונות בקיר</span><input type="number" data-pm="maxWindows" value="${r.maxWindows}" style="width:70px"><span>מעבר למקסימום</span>${sel(k, 'extra', r.extra)}` : ''}</div>`
+        : `<br>פתח — ${L[r.open]} · שינוי — ${L[r.change]} · הריסה — ${L[r.remove]}${k === 'mamad' ? ` · עד ${r.maxDoors} דלת ו-${r.maxWindows} חלון בקיר` : ''}`}</div></div>`).join('')}
+    <h3 style="margin-top:12px">↔️ מרווחים סביב רהיטים (ס"מ)</h3>
+    <div class="grid2">${num('furn', 'bedSide', p.furn.bedSide, 'צדי מיטה')}${num('furn', 'bedFront', p.furn.bedFront, 'מול מיטה')}${num('furn', 'dining', p.furn.dining, 'סביב שולחן אוכל')}${num('furn', 'wardrobeFront', p.furn.wardrobeFront, 'מול ארון')}${num('furn', 'island', p.furn.island, 'סביב אי — מינ׳')}${num('furn', 'islandMax', p.furn.islandMax, 'סביב אי — מקס׳')}</div>
+    <h3 style="margin-top:12px">🚪 מידות ברירת מחדל לפתחים (ס"מ)</h3>
+    <div class="grid2">${num('open', 'doorW', p.open.doorW, 'רוחב דלת')}${num('open', 'doorH', p.open.doorH, 'גובה דלת')}${num('open', 'winW', p.open.winW, 'רוחב חלון')}${num('open', 'winH', p.open.winH, 'גובה חלון')}${num('open', 'winSill', p.open.winSill, 'גובה חלון מהרצפה')}</div>
+    ${ed ? '' : '<div class="muted" style="margin-top:6px">לשינוי: "✏️ עריכה" למעלה.</div>'}</div>`;
+}
+function bindPlanRules(app) {
+  const C = () => { const c = editableRules(); c.plan = c.plan || { walls: {}, furn: {}, open: {} }; c.plan.walls = c.plan.walls || {}; c.plan.furn = c.plan.furn || {}; c.plan.open = c.plan.open || {}; return c.plan; };
+  app.querySelectorAll('[data-pw]').forEach(el => el.onchange = () => { const [k, act] = el.dataset.pw.split('|'), p = C(); p.walls[k] = { ...(p.walls[k] || {}), [act]: el.value }; rulesChanged(); toast('הכלל עודכן — חל עכשיו בכל האפליקציה'); render(); });
+  app.querySelectorAll('[data-pm]').forEach(el => el.onchange = () => { const p = C(), v = Math.max(0, +el.value || 0); p.walls.mamad = { ...(p.walls.mamad || {}), [el.dataset.pm]: v }; rulesChanged(); toast('הכלל עודכן'); });
+  app.querySelectorAll('[data-pn]').forEach(el => el.onchange = () => { const [g, k] = el.dataset.pn.split('|'), p = C(), v = +el.value; if (!(v >= 0)) return; p[g][k] = v; rulesChanged(); toast('הכלל עודכן'); });
+}
 function renderRules(app) {
   setHeader('ספר הכללים', false);
   const ed = !!V.editRules;
@@ -2144,12 +2179,14 @@ function renderRules(app) {
     <div class="card"><div class="rule red"><span class="dot red"></span><div>אדום = אסור</div></div>
       <div class="rule orange"><span class="dot orange"></span><div>כתום = דורש בדיקה</div></div>
       <div class="rule green"><span class="dot green"></span><div>ירוק = המלצה מקצועית</div></div></div>
+    ${planRulesCard(ed)}
     ${sec('_all', '🏠 כללי — כל החדרים')}
     ${ROOM_CATS.map(c => sec(c.id, c.icon + ' ' + c.name)).join('')}
     <div class="card"><h3>🛏️ מידות מיטות</h3>${BED_SIZES.map(b => `<div class="row"><span class="grow">${b.name}</span><b>${b.size}</b></div>`).join('')}</div>
     ${ed && S.custom ? '<button class="btn danger full" id="resetR">שחזור הכללים המקוריים</button><div style="height:10px"></div>' : ''}
     <div class="muted">הכללים מבוססים על חומרי הקורס ועל תקנים בישראל. הם עוזרים בסקיצה, ולא מחליפים איש מקצוע מוסמך.</div>`;
   $('#edT').onclick = () => { V.editRules = !ed; render(); };
+  bindPlanRules(app);
   app.querySelectorAll('[data-ef]').forEach(el => el.onclick = () => { const [k, i] = el.dataset.ef.split('|'); fixedRuleForm(k, +i); });
   app.querySelectorAll('[data-ec]').forEach(el => el.onclick = () => { const [k, i] = el.dataset.ec.split('|'); checkRuleForm(k, +i); });
   app.querySelectorAll('[data-af]').forEach(el => el.onclick = () => fixedRuleForm(el.dataset.af));
