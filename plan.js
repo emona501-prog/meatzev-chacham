@@ -124,8 +124,11 @@ function openingRule(w, kind) {
   }
   return ruleOf(r.open, r.open === 'red' ? `ספר הכללים אוסר פתיחת ${n} ב${nm}.` : `זה ${nm}. ${w.type === 'bearing' ? 'פריצה מחייבת אישור קונסטרוקטור.' : w.type === 'exterior' ? 'שינוי בחזית דורש היתר.' : 'כדאי לבדוק עם קונסטרוקטור.'} להוסיף ${n} לסקיצה בכל זאת?`);
 }
-function deleteRule(w) { const r = WR(w); return ruleOf(r.remove, r.remove === 'red' ? `ספר הכללים אוסר להרוס ${r.name}.` : `זה ${r.name}. הריסה מחייבת בדיקה${w.type === 'bearing' ? ' של קונסטרוקטור והיתר' : ''}. למחוק מהסקיצה בכל זאת?`); }
-function changeRule(w) { const r = WR(w); return ruleOf(r.change, r.change === 'red' ? `ספר הכללים אוסר להזיז או לשנות ${r.name}.` : `⚠️ ${r.name} — שינוי מחייב בדיקה של איש מקצוע.`); }
+// כללי "שינוי/הריסה" חלים על קירות קיימים באמת — כלומר כשנשמר "מצב קיים" והקיר הוא חלק ממנו.
+// בזמן שמשרטטים את הדירה (לפני "מצב קיים") זה תיקון שרטוט, ומותר ליישר / לקצר / למחוק גם ממ"ד.
+const isExisting = (w) => !!(P.plan?.original && P.plan.original.walls.some(o => o.id === w.id));
+function deleteRule(w) { if (!isExisting(w)) return null; const r = WR(w); return ruleOf(r.remove, r.remove === 'red' ? `ספר הכללים אוסר להרוס ${r.name}.` : `זה ${r.name}. הריסה מחייבת בדיקה${w.type === 'bearing' ? ' של קונסטרוקטור והיתר' : ''}. למחוק מהסקיצה בכל זאת?`); }
+function changeRule(w) { if (!isExisting(w)) return null; const r = WR(w); return ruleOf(r.change, r.change === 'red' ? `ספר הכללים אוסר להזיז או לשנות ${r.name}.` : `⚠️ ${r.name} — שינוי מחייב בדיקה של איש מקצוע.`); }
 function checkRule(r) {
   if (!r) return true;
   if (r.level === 'red') { alertBox(r); return false; }
@@ -919,7 +922,7 @@ function renderProps() {
     if ($('#oflip')) $('#oflip').onclick = () => { o.flip = !o.flip; upd(); };
     $('#ost').onchange = e => { o.style = e.target.value; upd(); };
     $('#odel').onclick = () => {
-      if (w.type === 'mamad' && WR(w).change !== 'green' && !confirm('זה פתח בקיר ממ"ד (כנראה החלון/הדלת המקוריים של הממ"ד). לפי ספר הכללים אסור לשנות אותם. למחוק מהסקיצה בכל זאת?')) return;
+      if (w.type === 'mamad' && isExisting(w) && WR(w).change !== 'green' && !confirm('זה פתח בקיר ממ"ד (כנראה החלון/הדלת המקוריים של הממ"ד). לפי ספר הכללים אסור לשנות אותם. למחוק מהסקיצה בכל זאת?')) return;
       P.plan.openings = P.plan.openings.filter(x => x !== o); P.sel = null; upd();
     };
   }
