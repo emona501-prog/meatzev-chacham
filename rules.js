@@ -209,7 +209,8 @@ window.PLAN_RULES = {
     unknown:  { name: 'קיר לא מאומת',    open: 'orange', change: 'orange', remove: 'orange' },
     interior: { name: 'קיר פנימי (גבס/בלוק)', open: 'green', change: 'green', remove: 'green' }
   },
-  furn: { bedSide: 60, bedFront: 80, dining: 90, island: 90, islandMax: 120, wardrobeFront: 60 },
+  // מרווחים: מינימום ומקסימום (0 = בלי מקסימום) — טווח, למשל צדי מיטה 60–100
+  furn: { bedSide: 70, bedSideMax: 100, bedFront: 80, bedFrontMax: 100, dining: 90, diningMax: 0, island: 90, islandMax: 120, wardrobeFront: 60, wardrobeFrontMax: 0 },
   open: { doorW: 90, doorH: 210, winW: 120, winH: 120, winSill: 90 },
   // עובי קירות תקני (ס"מ). בקנה מידה 1:50 כל שנתה בסרגל = 5 ס"מ → 10=2 שנתות, 15=3, 20=4, 25=5, 30=6
   thick: [10, 15, 20, 25, 30],

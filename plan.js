@@ -91,12 +91,13 @@ function PR() {
 }
 const WR = (w) => PR().walls[w.type || 'unknown'] || PR().walls.unknown;
 // כללי מרווח לריהוט — המספרים מספר הכללים
+const rg = (a, b) => b > 0 ? `${a}–${b}` : `${a}`; // טווח לתצוגה
 const FURN_RULES = new Proxy({}, { get(_, k) { const f = PR().furn; return ({
-  bed2: { sides: [['ימין', f.bedSide], ['שמאל', f.bedSide]], front: f.bedFront, msg: `בין מיטה לקיר ${f.bedSide} ס"מ; מול המיטה ${f.bedFront} ס"מ.` },
-  bed1: { sides: [['צד', f.bedSide]], anySide: true, front: f.bedFront, msg: `מיטת יחיד יכולה להיצמד לקיר מצד אחד; בצד הפתוח ${f.bedSide} ס"מ, מול המיטה ${f.bedFront}.` },
-  dining6: { all: f.dining, msg: `${f.dining} ס"מ בין השולחן לקיר.` }, dining4sq: { all: f.dining, msg: `${f.dining} ס"מ בין השולחן לקיר (גם מהפינות).` },
-  dining4r: { all: f.dining, msg: `${f.dining} ס"מ בין השולחן לקיר.` }, island: { all: f.island, maxAll: f.islandMax, msg: `מרווח סביב אי ${f.island}–${f.islandMax} ס"מ.` },
-  wardrobe: { front: f.wardrobeFront, msg: 'צריך מקום לפתיחת דלתות הארון מלפנים.' }
+  bed2: { side: f.bedSide, sideMax: f.bedSideMax, front: f.bedFront, frontMax: f.bedFrontMax, msg: `בין מיטה לקיר ${rg(f.bedSide, f.bedSideMax)} ס"מ; מול המיטה ${rg(f.bedFront, f.bedFrontMax)} ס"מ.` },
+  bed1: { side: f.bedSide, sideMax: f.bedSideMax, anySide: true, front: f.bedFront, frontMax: f.bedFrontMax, msg: `מיטת יחיד יכולה להיצמד לקיר מצד אחד; בצד הפתוח ${rg(f.bedSide, f.bedSideMax)} ס"מ, מול המיטה ${rg(f.bedFront, f.bedFrontMax)}.` },
+  dining6: { all: f.dining, maxAll: f.diningMax, corners: true, msg: `${rg(f.dining, f.diningMax)} ס"מ בין השולחן לקיר.` }, dining4sq: { all: f.dining, maxAll: f.diningMax, corners: true, msg: `${rg(f.dining, f.diningMax)} ס"מ בין השולחן לקיר (גם מהשפיץ/הפינה לקיר).` },
+  dining4r: { all: f.dining, maxAll: f.diningMax, corners: true, msg: `${rg(f.dining, f.diningMax)} ס"מ בין השולחן לקיר.` }, island: { all: f.island, maxAll: f.islandMax, msg: `מרווח סביב אי ${rg(f.island, f.islandMax)} ס"מ.` },
+  wardrobe: { front: f.wardrobeFront, frontMax: f.wardrobeFrontMax, msg: `צריך מקום לפתיחת דלתות הארון מלפנים: ${rg(f.wardrobeFront, f.wardrobeFrontMax)} ס"מ.` }
 })[k]; } });
 
 const P = {
@@ -458,7 +459,7 @@ function open(app, p) {
   if ($('#bBgDel')) $('#bBgDel').onclick = async () => { if (!confirm('להסיר את סרטוט הרקע?')) return; await delImg(P.plan.bg.img); P.plan.bg = null; P.bgImgEl = null; changed(); rerender(); };
 }
 function rerender() { open($('#app'), P.p); }
-window.__plan = { P, clearances: (f) => clearances(f, cur()), cvWalls: (im) => cvWalls(im) }; // לבדיקות
+window.__plan = { P, clearances: (f) => clearances(f, cur()), cvWalls: (im) => cvWalls(im), props: () => renderProps() }; // לבדיקות
 // ---- היסטוריה: ביטול / חזרה ללא הגבלה (לכל משך העבודה על התוכנית) ----
 const HKEYS = ['walls', 'openings', 'furniture', 'bg', 'original', 'mat', 'height'];
 function histSnap() { const o = {}; for (const k of HKEYS) o[k] = P.plan[k] === undefined ? undefined : JSON.parse(JSON.stringify(P.plan[k])); return JSON.stringify(o); }
@@ -897,13 +898,16 @@ function renderProps() {
     const f = (pl.furniture || []).find(x => x.id === P.sel.id); if (!f) { box.innerHTML = ''; return; }
     const def = FURN[f.type], cl = clearances(f, pl), rule = FURN_RULES[f.type], issues = [];
     const sideTxt = (v) => v === Infinity ? 'אין קיר' : (v < 3 ? 'צמוד לקיר' : fmt(v) + ' ס"מ');
-    if (rule) {
-      if (rule.all) for (const [n, v] of [['אחור', cl.back], ['חזית', cl.front], ['ימין', cl.right], ['שמאל', cl.left]]) { if (v < rule.all) issues.push(`${n}: ${sideTxt(v)} — מינימום ${rule.all}`); else if (rule.maxAll && v < Infinity && v > rule.maxAll + 60) {} }
-      if (rule.front && cl.front < rule.front) issues.push(`חזית: ${sideTxt(cl.front)} — מינימום ${rule.front}`);
-      if (rule.sides) {
+    if (rule) { // טווח: פחות מהמינימום = צפוף מדי · יותר מהמקסימום (כשיש קיר) = רחוק מדי
+      const chk = (n, v, mn, mx) => { if (v < mn) issues.push(`${n}: ${sideTxt(v)} — מינימום ${mn}`); else if (mx > 0 && v < Infinity && v > mx) issues.push(`${n}: ${sideTxt(v)} — מקסימום ${mx}`); };
+      if (rule.all) for (const [n, v] of [['אחור', cl.back], ['חזית', cl.front], ['ימין', cl.right], ['שמאל', cl.left]]) chk(n, v, rule.all, rule.maxAll);
+      if (rule.corners) { // גם מהשפיץ (פינת השולחן) לקיר — חשוב כשהשולחן מסובב או קרוב לפינה
+        const cd = cornerGap(f, pl); if (cd < rule.all) issues.push(`פינת השולחן: ${sideTxt(cd)} מהקיר — מינימום ${rule.all}`); }
+      if (rule.front) chk('חזית', cl.front, rule.front, rule.frontMax);
+      if (rule.side) {
         const sides = [cl.left, cl.right];
-        if (rule.anySide) { const open = Math.max(...sides); if (open < 60) issues.push(`צד פתוח: ${sideTxt(open)} — מינימום 60`); }
-        else for (const [i, v] of sides.entries()) if (v < 60) issues.push(`${i ? 'ימין' : 'שמאל'}: ${sideTxt(v)} — מינימום 60`);
+        if (rule.anySide) chk('צד פתוח', Math.max(...sides), rule.side, rule.sideMax);
+        else for (const [i, v] of sides.entries()) chk(i ? 'ימין' : 'שמאל', v, rule.side, rule.sideMax);
       }
     }
     const ed = (k, v) => v === Infinity ? `<div><label>${k[1]}</label><input disabled value="אין קיר"></div>` : `<div><label>${k[1]}</label><input type="number" inputmode="numeric" data-cl="${k[0]}" value="${Math.round(v)}" ${ro ? 'disabled' : ''}></div>`;
@@ -913,7 +917,7 @@ function renderProps() {
       <label>📏 מרחק מהקירות (ס"מ) — אפשר להקליד מספר מדויק</label>
       <div class="grid2">${ed(['front', 'חזית'], cl.front)}${ed(['back', 'גב'], cl.back)}${ed(['right', 'ימין'], cl.right)}${ed(['left', 'שמאל'], cl.left)}</div>
       <div class="grid2" style="margin-top:6px"><div><label>זווית (°)</label><input id="frotv" type="number" inputmode="numeric" value="${Math.round(f.rot || 0)}" ${ro ? 'disabled' : ''}></div><div></div></div>
-      ${issues.length ? `<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div><b>מרווח קטן מהמומלץ</b><br>${issues.map(esc).join('<br>')}<br><span class="muted">${esc(rule.msg)}</span></div></div>` : rule ? `<div class="rule green" style="margin-top:8px"><span class="dot green"></span><div>המרווחים תקינים ✓</div></div>` : ''}
+      ${issues.length ? `<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div><b>מרווח מחוץ לטווח המומלץ</b><br>${issues.map(esc).join('<br>')}<br><span class="muted">${esc(rule.msg)}</span></div></div>` : rule ? `<div class="rule green" style="margin-top:8px"><span class="dot green"></span><div>המרווחים תקינים ✓</div></div>` : ''}
       ${ro ? '' : `<div class="grid2" style="margin-top:10px"><button class="btn sec" id="fdup">⧉ שכפול</button><button class="btn danger" id="fdel">מחיקה</button></div>
       <div class="muted" style="margin-top:6px">גוררים את הפריט באצבע · העיגול ⟳ מסובב בכל זווית · החצים בתחתית התוכנית מזיזים בס"מ אחד</div>`}</div>`;
     if (ro) return;
@@ -996,6 +1000,16 @@ function renderProps() {
 }
 
 // מרחק מכל צד של הפריט לקיר הקרוב (קרן מאמצע הצד החוצה)
+// המרחק הקצר ביותר מפינות הרהיט (או מהיקף שולחן עגול) לקיר הקרוב — "מהשפיץ לקיר"
+function cornerGap(f, pl) {
+  const a = (f.rot || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a), round = FURN[f.type]?.round;
+  const pts = round ? Array.from({ length: 16 }, (_, i) => { const t = i / 16 * Math.PI * 2; return [Math.cos(t) * f.w / 2, Math.sin(t) * f.d / 2]; }) : [[-f.w / 2, -f.d / 2], [f.w / 2, -f.d / 2], [f.w / 2, f.d / 2], [-f.w / 2, f.d / 2]];
+  let best = Infinity;
+  for (const [lx, ly] of pts) { const x = f.x + lx * ca - ly * sa, y = f.y + lx * sa + ly * ca;
+    for (const w of pl.walls) { const ex = w.x2 - w.x1, ey = w.y2 - w.y1, L2 = ex * ex + ey * ey || 1, t = Math.max(0, Math.min(1, ((x - w.x1) * ex + (y - w.y1) * ey) / L2));
+      best = Math.min(best, Math.max(0, Math.hypot(x - (w.x1 + t * ex), y - (w.y1 + t * ey)) - w.thick / 2)); } }
+  return best;
+}
 function clearances(f, pl) {
   const a = (f.rot || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
   const loc = (lx, ly) => ({ x: f.x + lx * ca - ly * sa, y: f.y + lx * sa + ly * ca });

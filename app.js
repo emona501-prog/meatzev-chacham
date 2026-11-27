@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.1.6';
+const APP_VERSION = '1.1.7';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -2318,7 +2318,7 @@ function planRuleLines() { // אותם כללים בדיוק — גם להנחי
     out.push({ level: worst, text: `${r.name}: פתיחת פתח — ${L[r.open]}; הזזה/שינוי — ${L[r.change]}; הריסה — ${L[r.remove]}.${k === 'mamad' ? ` עד ${r.maxDoors} דלת ו-${r.maxWindows} חלון בכל קיר; מעבר לזה — ${L[r.extra]}.` : ''}` });
   }
   out.push({ level: 'green', text: 'גמרים מותרים בכל קיר — גם בקיר חיצוני, נושא וממ"ד: צבע, טיח דקורטיבי, חיפוי, טפט, תמונות, מדפים ותאורה. הכללים של הקירות חלים רק על פתיחת פתח, הזזה/שינוי והריסה של הקיר עצמו.' });
-  const f = p.furn; out.push({ level: 'green', text: `מרווחים: ${f.bedSide} ס"מ בצדי מיטה, ${f.bedFront} ס"מ מול מיטה, ${f.dining} ס"מ סביב שולחן אוכל, ${f.island}–${f.islandMax} ס"מ סביב אי, ${f.wardrobeFront} ס"מ מול ארון.` });
+  const f = p.furn, rg = (a, b) => b > 0 ? `${a}–${b}` : `לפחות ${a}`; out.push({ level: 'green', text: `מרווחים (מינימום–מקסימום): ${rg(f.bedSide, f.bedSideMax)} ס"מ בצדי מיטה, ${rg(f.bedFront, f.bedFrontMax)} ס"מ מול מיטה, ${rg(f.dining, f.diningMax)} ס"מ סביב שולחן אוכל, ${rg(f.island, f.islandMax)} ס"מ סביב אי, ${rg(f.wardrobeFront, f.wardrobeFrontMax)} ס"מ מול ארון.` });
   out.push({ level: 'orange', text: `עובי קיר תמיד אחד מ: ${p.thick.join(', ')} ס"מ. קנה מידה: ${Object.entries(p.ticks).map(([k, v]) => `1:${k} — כל פס בסרגל = ${v} ס"מ`).join(' · ')} (למשל ב-1:50 קיר 15 = ${15 / (p.ticks[50] || 5)} פסים).` });
   out.push({ level: 'green', text: `ברירת מחדל: דלת ${p.open.doorW}×${p.open.doorH} ס"מ, חלון ${p.open.winW}×${p.open.winH} ס"מ בגובה ${p.open.winSill} ס"מ מהרצפה.` });
   return out;
@@ -2335,7 +2335,10 @@ function planRulesCard(ed) {
         ${k === 'mamad' ? `<span>מקס׳ דלתות בקיר</span><input type="number" data-pm="maxDoors" value="${r.maxDoors}" style="width:70px"><span>מקס׳ חלונות בקיר</span><input type="number" data-pm="maxWindows" value="${r.maxWindows}" style="width:70px"><span>מעבר למקסימום</span>${sel(k, 'extra', r.extra)}` : ''}</div>`
         : `<br>פתח — ${L[r.open]} · שינוי — ${L[r.change]} · הריסה — ${L[r.remove]}${k === 'mamad' ? ` · עד ${r.maxDoors} דלת ו-${r.maxWindows} חלון בקיר` : ''}`}</div></div>`).join('')}
     <h3 style="margin-top:12px">↔️ מרווחים סביב רהיטים (ס"מ)</h3>
-    <div class="grid2">${num('furn', 'bedSide', p.furn.bedSide, 'צדי מיטה')}${num('furn', 'bedFront', p.furn.bedFront, 'מול מיטה')}${num('furn', 'dining', p.furn.dining, 'סביב שולחן אוכל')}${num('furn', 'wardrobeFront', p.furn.wardrobeFront, 'מול ארון')}${num('furn', 'island', p.furn.island, 'סביב אי — מינ׳')}${num('furn', 'islandMax', p.furn.islandMax, 'סביב אי — מקס׳')}</div>
+    <div class="muted" style="font-size:12px;margin-bottom:4px">לכל מרווח: מינימום – מקסימום (מקסימום ריק = בלי הגבלה). למשל צדי מיטה 60 – 100.</div>
+    ${[['bedSide', 'צדי מיטה'], ['bedFront', 'מול מיטה'], ['dining', 'סביב שולחן אוכל'], ['island', 'סביב אי מטבח'], ['wardrobeFront', 'מול ארון']].map(([k, lb]) => `<div class="row" style="gap:6px;align-items:center;margin:4px 0"><span class="grow">${lb}</span>
+      <input type="number" inputmode="numeric" data-pn="furn|${k}" value="${p.furn[k] ?? ''}" placeholder="מינ׳" style="width:74px;text-align:center" ${ed ? '' : 'disabled'}><span>–</span>
+      <input type="number" inputmode="numeric" data-pn="furn|${k}Max" value="${p.furn[k + 'Max'] || ''}" placeholder="מקס׳" style="width:74px;text-align:center" ${ed ? '' : 'disabled'}></div>`).join('')}
     <h3 style="margin-top:12px">📏 קנה מידה ועובי קירות</h3>
     <div class="muted" style="margin-bottom:6px">כמה ס"מ שווה כל פס בסרגל. קובע את הסרגלים, את ההצמדה בזמן שרטוט ואת ספירת הפסים של העובי.</div>
     <div class="grid2">${Object.entries(p.ticks).map(([k, v]) => `<div><label>1:${k} — כל פס =</label><input type="number" inputmode="decimal" data-pt="${k}" value="${v}" ${ed ? '' : 'disabled'}></div>`).join('')}
