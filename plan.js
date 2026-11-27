@@ -358,10 +358,11 @@ function open(app, p) {
         <button class="btn sec sm" id="zin">＋</button><button class="btn sec sm" id="zout">－</button><button class="btn sec sm" id="zfit">⤢</button></div>
       ${!P.plan.walls.length && !P.plan.bg && !P.hintClosed ? `<div id="emptyHint" style="position:absolute;bottom:10px;right:10px;left:62px;text-align:center;background:rgba(255,255,255,.95);border:1px dashed var(--accent);border-radius:14px;padding:12px 12px 10px;color:var(--ink);font-size:13px;line-height:1.45;z-index:2">
         <button id="ehX" class="btn sm" style="position:absolute;top:6px;left:6px;padding:4px 10px">✕ הבנתי</button>
-        <b>התוכנית ריקה</b><br>כל משבצת = 50 ס"מ<br><br>✏️ לשרטט: בוחרים <b>🧱 קיר</b>, נוגעים בנקודה אחת ואז בנקודה הבאה — הקירות נמשכים זה מזה. "✓ סיום קו" כשמסיימים.<br><br>📷 או: <b>🤖 זיהוי תוכנית מתמונה</b> (למטה) — והבית נבנה לבד.<br><br>⤢ מציג את כל התוכנית.</div>` : ''}
+        <b>התוכנית ריקה</b><br>כל המידות בס"מ (365 = 3.65 מטר) · הסרגל למעלה מראה מטרים<br><br>✏️ לשרטט: בוחרים <b>🧱 קיר</b>, נוגעים בנקודה אחת ואז בנקודה הבאה — הקירות נמשכים זה מזה. "✓ סיום קו" כשמסיימים.<br><br>📷 או: <b>🤖 זיהוי תוכנית מתמונה</b> (למטה) — והבית נבנה לבד.<br><br>⤢ מציג את כל התוכנית.</div>` : ''}
       <div id="fbar" style="position:absolute;bottom:8px;left:8px;right:8px;display:none;gap:5px;flex-wrap:wrap;justify-content:center;background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:12px;padding:6px"></div>
       <div id="chainBar" style="position:absolute;bottom:8px;right:8px;display:none"><button class="btn sm" id="endChain">✓ סיום קו</button></div>
-      ${P.plan.original ? `<div style="position:absolute;top:8px;right:8px"><button class="btn ${P.showOriginal ? '' : 'sec'} sm" id="baBtn">${P.showOriginal ? '👁 מצב קיים (לפני)' : '✏️ אחרי (תכנון)'}</button></div>` : ''}
+      ${P.plan.walls.length ? `<button class="btn sm" id="planDone" style="position:absolute;top:${AID().rulers ? 26 : 8}px;left:50%;transform:translateX(-50%);z-index:2;box-shadow:0 2px 8px #0003">✓ סיימתי — מה הלאה?</button>` : ''}
+      ${P.plan.original ? `<div style="position:absolute;top:${AID().rulers ? 26 : 8}px;right:26px"><button class="btn ${P.showOriginal ? '' : 'sec'} sm" id="baBtn">${P.showOriginal ? '👁 מצב קיים (לפני)' : '✏️ אחרי (תכנון)'}</button></div>` : ''}
     </div>
     <div id="props" style="margin-top:10px"></div>
     <div class="card" style="margin-top:10px">
@@ -391,6 +392,7 @@ function open(app, p) {
   $('#bDxf').onclick = () => exportDXF(p);
   $('#bBg').onclick = pickBackground;
   $('#bAiPlan').onclick = aiPlanFromImage;
+  if ($('#planDone')) $('#planDone').onclick = planDoneMenu;
   $('#bOrig').onclick = () => {
     if (!P.plan.walls.length) return toast('קודם משרטטים את הבית');
     if (P.plan.original && !confirm('לעדכן את "מצב קיים" לתוכנית הנוכחית? המצב הקודם יוחלף.')) return;
@@ -610,6 +612,44 @@ function hitWallEnd(pt) { const w = selWall(); if (!w) return null; const r = 22
 function linkedEnds(w, end) { const x = w['x' + end], y = w['y' + end], out = []; for (const o of P.plan.walls) if (o !== w) for (const e of [1, 2]) if (Math.abs(o['x' + e] - x) < 1 && Math.abs(o['y' + e] - y) < 1) out.push([o, e]); return out; }
 function clampOpenings(w) { const L = len(w); for (const o of P.plan.openings) if (o.wallId === w.id) { o.width = Math.min(o.width, Math.max(30, L - 10)); o.pos = Math.max(o.width / 2, Math.min(L - o.width / 2, o.pos)); } }
 function moveWallBy(w, dx, dy, links) { w.x1 += dx; w.y1 += dy; w.x2 += dx; w.y2 += dy; for (const [o, e] of links) { o['x' + e] += dx; o['y' + e] += dy; clampOpenings(o); } }
+// ✓ סיום שרטוט: מה עושים עם התוכנית (היא נשמרת אוטומטית בכל שינוי)
+function planDoneMenu() {
+  const xs = P.plan.walls.flatMap(w => [w.x1, w.x2]), ys = P.plan.walls.flatMap(w => [w.y1, w.y2]);
+  const W = Math.max(...xs) - Math.min(...xs), H = Math.max(...ys) - Math.min(...ys), big = Math.max(W, H) > 3000;
+  modal('✓ התוכנית נשמרה', `<div class="rule green"><span class="dot green"></span><div>כל שינוי נשמר אוטומטית בפרויקט. גודל כולל: ${(W / 100).toFixed(1)} × ${(H / 100).toFixed(1)} מטר.</div></div>
+    ${big ? `<div class="rule orange" style="margin-top:8px"><span class="dot orange"></span><div><b>שים לב: התוכנית יצאה ${(Math.max(W, H) / 100).toFixed(0)} מטר — גדול מאוד לדירה.</b> המספרים על הקירות הם בס"מ (3650 = 36.5 מטר). אם התכוונת למטרים בודדים — לחץ "📐 תיקון קנה מידה" והקלד את האורך האמיתי של קיר אחד, וכל התוכנית תוקטן בהתאם.</div></div>` : ''}
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+      <button class="btn" id="dn3d">🏠 לראות ולטייל בתלת־ממד</button>
+      <button class="btn sec" id="dnScale">📐 תיקון קנה מידה — לפי אורך אמיתי של קיר</button>
+      <button class="btn sec" id="dnOrig">${P.plan.original ? '🔄 עדכון "מצב קיים"' : '📸 לשמור את זה כ"מצב קיים" (לפני השיפוץ)'}</button>
+      <button class="btn sec" id="dnDxf">⬇️ ייצוא לאוטוקאד (DXF)</button>
+      <button class="btn sec" id="dnBack">📁 חזרה לפרויקט</button></div>
+    <div class="muted" style="margin-top:10px">טיפ: "מצב קיים" שומר את הדירה כמו שהיא היום. אחר כך משנים (מזיזים קירות, מוסיפים רהיטים) ורואים לפני/אחרי.</div>`, (b, close) => {
+    $('#dn3d', b).onclick = () => { close(); open3D(P.plan); };
+    $('#dnDxf', b).onclick = () => { close(); $('#bDxf')?.click(); };
+    $('#dnOrig', b).onclick = () => { close(); $('#bOrig')?.click(); };
+    $('#dnBack', b).onclick = () => { close(); $('#backBtn')?.click(); };
+    $('#dnScale', b).onclick = () => { close(); scalePlanDialog(); };
+  });
+}
+function scalePlanDialog() {
+  const w0 = selWall() || P.plan.walls.slice().sort((a, b) => len(b) - len(a))[0]; if (!w0) return;
+  modal('📐 תיקון קנה מידה', `<div class="muted">בוחרים קיר שאתה יודע את האורך האמיתי שלו, ומקלידים אותו. כל התוכנית (קירות, פתחים ורהיטים) תוגדל או תוקטן באותו יחס.</div>
+    <label>הקיר</label><select id="scW">${P.plan.walls.map((w, i) => `<option value="${w.id}" ${w === w0 ? 'selected' : ''}>קיר ${i + 1} — עכשיו ${fmt(len(w))} ס"מ</option>`).join('')}</select>
+    <label>האורך האמיתי שלו (ס"מ)</label><input id="scL" type="number" inputmode="numeric" placeholder="למשל 365">
+    <button class="btn full" id="scGo" style="margin-top:12px">להתאים את כל התוכנית</button>`, (b, close) => {
+    $('#scGo', b).onclick = () => {
+      const w = P.plan.walls.find(x => x.id === $('#scW', b).value), real = +$('#scL', b).value; if (!w || !(real > 0)) return toast('מקלידים אורך');
+      const k = real / len(w), ox = w.x1, oy = w.y1, sc = (v, o) => Math.round(o + (v - o) * k);
+      for (const x of P.plan.walls) { x.x1 = sc(x.x1, ox); x.y1 = sc(x.y1, oy); x.x2 = sc(x.x2, ox); x.y2 = sc(x.y2, oy); }
+      for (const o of P.plan.openings) o.pos = o.pos * k;
+      for (const f of (P.plan.furniture || [])) { f.x = sc(f.x, ox); f.y = sc(f.y, oy); }
+      if (P.plan.bg) { P.plan.bg.scale *= k; P.plan.bg.x = sc(P.plan.bg.x || 0, ox); P.plan.bg.y = sc(P.plan.bg.y || 0, oy); }
+      for (const x of P.plan.walls) clampOpenings(x);
+      changed(); close(); fit(); draw(); renderProps(); toast(`התוכנית הותאמה (×${k.toFixed(k < 0.1 ? 3 : 2)}) · אפשר לבטל ב-↶`);
+    };
+  });
+}
 // ⧉ העתקת קיר: אותו אורך, סוג ועובי — במקביל, במרחק מדויק (בלי הפתחים)
 function copyWallDialog(w) {
   const L = len(w), nx = -(w.y2 - w.y1) / L, ny = (w.x2 - w.x1) / L;
