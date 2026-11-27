@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.1.5';
+const APP_VERSION = '1.1.6';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -2317,6 +2317,7 @@ function planRuleLines() { // אותם כללים בדיוק — גם להנחי
     const worst = [r.open, r.change, r.remove].includes('red') ? 'red' : [r.open, r.change, r.remove].includes('orange') ? 'orange' : 'green';
     out.push({ level: worst, text: `${r.name}: פתיחת פתח — ${L[r.open]}; הזזה/שינוי — ${L[r.change]}; הריסה — ${L[r.remove]}.${k === 'mamad' ? ` עד ${r.maxDoors} דלת ו-${r.maxWindows} חלון בכל קיר; מעבר לזה — ${L[r.extra]}.` : ''}` });
   }
+  out.push({ level: 'green', text: 'גמרים מותרים בכל קיר — גם בקיר חיצוני, נושא וממ"ד: צבע, טיח דקורטיבי, חיפוי, טפט, תמונות, מדפים ותאורה. הכללים של הקירות חלים רק על פתיחת פתח, הזזה/שינוי והריסה של הקיר עצמו.' });
   const f = p.furn; out.push({ level: 'green', text: `מרווחים: ${f.bedSide} ס"מ בצדי מיטה, ${f.bedFront} ס"מ מול מיטה, ${f.dining} ס"מ סביב שולחן אוכל, ${f.island}–${f.islandMax} ס"מ סביב אי, ${f.wardrobeFront} ס"מ מול ארון.` });
   out.push({ level: 'orange', text: `עובי קיר תמיד אחד מ: ${p.thick.join(', ')} ס"מ. קנה מידה: ${Object.entries(p.ticks).map(([k, v]) => `1:${k} — כל פס בסרגל = ${v} ס"מ`).join(' · ')} (למשל ב-1:50 קיר 15 = ${15 / (p.ticks[50] || 5)} פסים).` });
   out.push({ level: 'green', text: `ברירת מחדל: דלת ${p.open.doorW}×${p.open.doorH} ס"מ, חלון ${p.open.winW}×${p.open.winH} ס"מ בגובה ${p.open.winSill} ס"מ מהרצפה.` });
@@ -2328,6 +2329,7 @@ function planRulesCard(ed) {
   const num = (grp, k, v, label) => `<div><label>${label}</label><input type="number" inputmode="numeric" data-pn="${grp}|${k}" value="${v}" ${ed ? '' : 'disabled'}></div>`;
   return `<div class="card rsec" id="rs-plan"><h3>📐 כללי שרטוט — חלים על השרטוט, התלת־ממד, האזהרות וה-AI</h3>
     <div class="muted" style="margin-bottom:8px">כל שינוי כאן חל מיד בכל האפליקציה (וגם אצל השותפים במאגר).</div>
+    <div class="rule green"><span class="dot green"></span><div class="grow"><b>גמרים — מותר בכל קיר</b><br>צבע, חיפוי, טפט, תמונות, מדפים ותאורה — מותרים גם בקיר חיצוני, נושא וממ"ד. הכללים למטה חלים רק על פתח, הזזה והריסה של הקיר עצמו.</div></div>
     ${Object.entries(p.walls).map(([k, r]) => `<div class="rule ${[r.open, r.change, r.remove].includes('red') ? 'red' : [r.open, r.change, r.remove].includes('orange') ? 'orange' : 'green'}"><span class="dot ${[r.open, r.change, r.remove].includes('red') ? 'red' : [r.open, r.change, r.remove].includes('orange') ? 'orange' : 'green'}"></span><div class="grow"><b>${esc(r.name)}</b>
       ${ed ? `<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:6px"><span>פתיחת פתח</span>${sel(k, 'open', r.open)}<span>הזזה / שינוי</span>${sel(k, 'change', r.change)}<span>הריסה</span>${sel(k, 'remove', r.remove)}
         ${k === 'mamad' ? `<span>מקס׳ דלתות בקיר</span><input type="number" data-pm="maxDoors" value="${r.maxDoors}" style="width:70px"><span>מקס׳ חלונות בקיר</span><input type="number" data-pm="maxWindows" value="${r.maxWindows}" style="width:70px"><span>מעבר למקסימום</span>${sel(k, 'extra', r.extra)}` : ''}</div>`
