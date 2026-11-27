@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -643,9 +643,11 @@ function flipbook(list, start = 0, projectId = '') {
   const page = (it) => {
     const d = document.createElement('div'); d.className = 'fb-page';
     d.innerHTML = `<div class="fb-img"><img alt=""></div>
-      <div class="fb-info"><div class="fb-cat">${esc(it.cat)}${it.sub ? ' › ' + esc(it.sub) : ''}</div><h3>${esc(it.name)}</h3>
+      <div class="fb-info"><div class="fb-cat">${esc(it.cat)}${it.sub ? ' › ' + esc(it.sub) : ''}</div><h3>${esc(it.name)}</h3>${dotsHTML(it, it.id)}
       ${[['🎨', it.color], ['📏', it.dims], ['🏷️', it.supplier], ['#', it.model], ['₪', it.price]].filter(x => x[1]).map(([k, v]) => `<span class="fb-chip">${k} ${esc(v)}</span>`).join('')}
       ${it.note ? `<p>${esc(it.note)}</p>` : ''}${it.angles?.length ? `<div class="muted">🔄 ${it.angles.length + 1} זוויות — גוררים על התמונה</div>` : ''}</div>`;
+    d.querySelectorAll('[data-vid]').forEach(dt => dt.onclick = (e) => { e.stopPropagation(); const v = S.catalog.find(x => x.id === dt.dataset.vid); if (!v || v.id === list[i].id) return; list[i] = v; const n = page(v); stage.replaceChild(n, cur); cur = n; refresh(); });
+    d.querySelectorAll('.cdots').forEach(c => c.addEventListener('pointerdown', e => e.stopPropagation()));
     (async () => {
       const im = d.querySelector('img'); if (it.th) im.src = it.th;
       const full = await getImg(it.img) || await Sync.fetchImg(it.img); const srcs = [full || it.th, ...(await loadImgs(it.angles || []))].filter(Boolean);
@@ -729,6 +731,122 @@ function flipbook(list, start = 0, projectId = '') {
     });
   };
 }
+
+// =====================================================================
+// 🎨 גרסאות צבע + קבוצות (אותו מוצר בצבעים שונים) + פירוק סטים לפריטים בודדים
+const METALS = {
+  gold:      { name: 'זהב',      dot: '#c9a04a', stops: [[52, 34, 8], [184, 138, 52], [255, 236, 170]] },
+  champagne: { name: 'שמפניה',   dot: '#d8c49e', stops: [[64, 54, 38], [196, 176, 136], [252, 244, 222]] },
+  silver:    { name: 'כסף',      dot: '#c8ccd2', stops: [[34, 36, 40], [164, 168, 175], [252, 252, 254]] },
+  rose:      { name: 'רוז גולד', dot: '#d9a08c', stops: [[66, 36, 30], [200, 138, 118], [255, 226, 212]] },
+  bronze:    { name: 'ברונזה',   dot: '#8a6236', stops: [[38, 24, 10], [132, 92, 50], [222, 188, 128]] },
+  black:     { name: 'שחור מט',  dot: '#2a2a2c', stops: [[8, 8, 9], [42, 42, 45], [128, 128, 132]] }
+};
+const COLOR_WORDS = ['זהב', 'מוזהב', 'מוזהבים', 'כסוף', 'כסופה', 'כסופים', 'כסף', 'שמפניה', 'רוז', 'גולד', 'ברונזה', 'שחור', 'שחורים'];
+function metalOf(it) {
+  if (it.metal) return it.metal; const c = (it.color || '') + ' ' + (it.name || '');
+  return /רוז/.test(c) ? 'rose' : /שמפניה/.test(c) ? 'champagne' : /זהב|מוזהב|פליז/.test(c) ? 'gold' : /כסף|כסוף|ניקל|כרום/.test(c) ? 'silver' : /ברונזה|נחושת/.test(c) ? 'bronze' : /שחור/.test(c) ? 'black' : '';
+}
+const grpOf = (it) => it.grp || it.id;
+const siblings = (it) => { const g = grpOf(it); return S.catalog.filter(x => !x.deleted && grpOf(x) === g); };
+const dotColor = (it) => METALS[metalOf(it)]?.dot || '#bbb';
+// מציג מוצר אחד מכל קבוצה (הראשון), בלי לאבד אף מוצר
+function collapseGroups(list) { // נציג לכל קבוצה: המוצר המקורי (לא גרסת צבע), במקום של הראשון ברשימה
+  const pos = new Map(), rep = new Map();
+  list.forEach((x, i) => { const g = grpOf(x); if (!pos.has(g)) pos.set(g, i); const r = rep.get(g); if (!r || (r.variantOf && !x.variantOf)) rep.set(g, x); });
+  return [...pos.entries()].sort((a, b) => a[1] - b[1]).map(([g]) => rep.get(g));
+}
+function dotsHTML(it, cur) { const sib = siblings(it); if (sib.length < 2) return ''; return `<div class="cdots">${sib.map(x => `<span class="cdot${x.id === cur ? ' on' : ''}" data-vid="${x.id}" title="${esc(x.color || METALS[metalOf(x)]?.name || '')}" style="background:${dotColor(x)}"></span>`).join('')}</div>`; }
+// צביעה מחדש של גזירה: מפת גוונים לפי בהירות (שומר הברקות וצללים), בלי לגעת בנרות לבנים/זכוכית
+async function recolorCut(src, key, baseMetal) {
+  const im = await loadImg(src), W = im.width, H = im.height, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d'); x.drawImage(im, 0, 0); const d = x.getImageData(0, 0, W, H), p = d.data, st = METALS[key].stops;
+  const protectWhite = baseMetal && baseMetal !== 'silver' && baseMetal !== 'black';
+  const Ls = []; for (let i = 0; i < p.length; i += 16) if (p[i + 3] > 60) Ls.push((p[i] * .3 + p[i + 1] * .59 + p[i + 2] * .11) / 255);
+  Ls.sort((a, b) => a - b); const lo = Ls[Math.floor(Ls.length * .02)] || 0, hi = Ls[Math.floor(Ls.length * .98)] || 1;
+  const grad = (t) => { const a = t < .5 ? st[0] : st[1], b = t < .5 ? st[1] : st[2], k = t < .5 ? t * 2 : (t - .5) * 2; return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]; };
+  for (let i = 0; i < p.length; i += 4) {
+    if (p[i + 3] < 8) continue; const r = p[i], g = p[i + 1], b = p[i + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b), sat = mx ? (mx - mn) / mx : 0, L = (r * .3 + g * .59 + b * .11) / 255;
+    if (protectWhite && ((sat < 0.12 && L > 0.8) || (sat < 0.4 && L > 0.5))) continue; // נר לבן / זכוכית — נשאר (המתכת הזהובה רוויה יותר)
+    const t = Math.max(0, Math.min(1, (L - lo) / Math.max(.05, hi - lo))), [nr, ng, nb] = grad(t);
+    p[i] = nr; p[i + 1] = ng; p[i + 2] = nb;
+  }
+  x.putImageData(d, 0, 0); const u = c.toDataURL('image/webp', 0.9); return u.startsWith('data:image/webp') ? u : c.toDataURL('image/png');
+}
+async function onWhite(src) { const im = await loadImg(src), pad = Math.round(Math.max(im.width, im.height) * .06), c = document.createElement('canvas'); c.width = im.width + pad * 2; c.height = im.height + pad * 2; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, pad, pad); return c.toDataURL('image/jpeg', 0.9); }
+const stripColor = (name) => name.split(/\s+/).filter(w => !COLOR_WORDS.includes(w.replace(/[^֐-׿]/g, ''))).join(' ').replace(/\s+—.*$/, '').trim();
+async function makeVariants(base, keys, onStatus) {
+  const cut = await itemCutout(base); if (!cut) throw new Error('אין תמונה למוצר');
+  const bm = metalOf(base); base.grp = grpOf(base); if (!base.metal && bm) base.metal = bm; base.updated = Date.now(); base.synced = false; Sync.pushItem(base);
+  const made = [];
+  for (const k of keys) {
+    if (siblings(base).some(x => metalOf(x) === k)) continue;
+    onStatus && onStatus(`יוצר ${METALS[k].name}…`);
+    const vc = await recolorCut(cut, k, bm), img = await onWhite(vc);
+    const it = { ...base, id: uid(), grp: base.grp, metal: k, color: METALS[k].name, name: `${stripColor(base.name)} — ${METALS[k].name}`, img: await putImg(img), cut: await putImg(vc), th: await makeThumb(img), angles: [], review: false, ph: await imgHash(img), created: Date.now(), updated: Date.now(), synced: false, variantOf: base.id };
+    delete it.cutTried; delete it.cutPending; it.cutPending = true;
+    S.catalog.push(it); made.push(it); save(); Sync.pushItem(it, img);
+  }
+  return made;
+}
+// ✂️ פירוק סט: כל חלק שקוף נפרד בגזירה = פריט בודד (למשל 3 פמוטים בתמונה אחת)
+const PART_CACHE = {};
+async function itemParts(it) {
+  const key = it.cut || it.img; if (PART_CACHE[key]) return PART_CACHE[key];
+  const src = await itemCutout(it); if (!src) return [];
+  const im = await loadImg(src), sc = Math.min(1, 360 / Math.max(im.width, im.height)), w = Math.max(1, Math.round(im.width * sc)), h = Math.max(1, Math.round(im.height * sc));
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); x.drawImage(im, 0, 0, w, h);
+  const a = x.getImageData(0, 0, w, h).data, lab = new Int32Array(w * h).fill(-1), comps = [];
+  for (let k = 0; k < w * h; k++) {
+    if (lab[k] >= 0 || a[k * 4 + 3] < 40) continue; const id = comps.length, st = [k]; let n = 0, x0 = w, y0 = h, x1 = 0, y1 = 0; lab[k] = id;
+    while (st.length) { const q = st.pop(), qx = q % w, qy = (q / w) | 0; n++; if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const nx = qx + dx, ny = qy + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const nk = ny * w + nx; if (lab[nk] < 0 && a[nk * 4 + 3] >= 40) { lab[nk] = id; st.push(nk); } } }
+    comps.push({ n, x0, y0, x1, y1 });
+  }
+  const big = Math.max(0, ...comps.map(c => c.n)); let keep = comps.filter(c => c.n >= big * 0.08);
+  // חלק קטן שיושב מעל/בתוך חלק גדול (להבה, ידית) מצורף אליו
+  keep = keep.filter(c => !keep.some(o => o !== c && o.n > c.n * 3 && c.x0 >= o.x0 - 4 && c.x1 <= o.x1 + 4 && c.y1 <= o.y1 + 4 && c.y0 >= o.y0 - (o.y1 - o.y0) * .6));
+  if (keep.length < 2 || keep.length > 8) return (PART_CACHE[key] = []);
+  keep.sort((p, q) => p.x0 - q.x0);
+  const parts = keep.map((c, i) => {
+    const X0 = Math.max(0, Math.floor(c.x0 / sc) - 4), Y0 = Math.max(0, Math.floor(c.y0 / sc) - 4), X1 = Math.min(im.width, Math.ceil((c.x1 + 1) / sc) + 4), Y1 = Math.min(im.height, Math.ceil((c.y1 + 1) / sc) + 4);
+    const o = document.createElement('canvas'); o.width = X1 - X0; o.height = Y1 - Y0; const ox = o.getContext('2d'); ox.drawImage(im, -X0, -Y0);
+    // מנקים שאריות של חלקים שכנים שנכנסו למלבן
+    const od = ox.getImageData(0, 0, o.width, o.height), op = od.data;
+    for (let yy = 0; yy < o.height; yy++) for (let xx = 0; xx < o.width; xx++) { const sx = Math.min(w - 1, Math.floor((xx + X0) * sc)), sy = Math.min(h - 1, Math.floor((yy + Y0) * sc)), L = lab[sy * w + sx]; if (L >= 0 && comps[L] !== c && keep.includes(comps[L])) op[(yy * o.width + xx) * 4 + 3] = 0; }
+    ox.putImageData(od, 0, 0);
+    return { i, url: o.toDataURL('image/png'), cx: (X0 + X1) / 2 / im.width, cy: (Y0 + Y1) / 2 / im.height, w: (X1 - X0) / im.width, h: (Y1 - Y0) / im.height };
+  });
+  return (PART_CACHE[key] = parts);
+}
+// חלון בחירה: כל הסט או רק חלק מהפריטים
+function choosePartsDialog(it, parts) {
+  return new Promise(res => {
+    let done = false; const fin = (v) => { if (!done) { done = true; res(v); } };
+    modal('✂️ כל הסט או רק חלק?', `<div class="muted">בתמונה יש ${parts.length} פריטים. בוחרים אילו להוסיף — כל פריט יהיה נפרד, ואפשר להזיז כל אחד לבד.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:10px 0">${parts.map(p => `<label style="width:88px;text-align:center;cursor:pointer"><div style="height:110px;display:flex;align-items:flex-end;justify-content:center;background:#f6f2ec;border-radius:10px;padding:4px"><img src="${p.url}" style="max-width:100%;max-height:100%"></div><input type="checkbox" data-pi="${p.i}" checked> פריט ${p.i + 1}</label>`).join('')}</div>
+      <div class="grid2"><button class="btn" id="cpSel">➕ הוספת המסומנים</button><button class="btn sec" id="cpAll">כל הסט כתמונה אחת</button></div>`, (b, close) => {
+      $('#cpAll', b).onclick = () => { fin(null); close(); };
+      $('#cpSel', b).onclick = () => { const sel = [...b.querySelectorAll('[data-pi]:checked')].map(x => +x.dataset.pi); if (!sel.length) return toast('מסמנים לפחות פריט אחד'); fin(sel); close(); };
+      const ob = new MutationObserver(() => { if (!b.isConnected) { ob.disconnect(); fin(undefined); } }); ob.observe(document.body, { childList: true, subtree: true });
+    });
+  });
+}
+function variantsDialog(it, after) {
+  const have = new Set(siblings(it).map(metalOf));
+  modal('🎨 גרסאות צבע', `<div class="muted">יוצרים לאותו מוצר גרסאות בגימורים אחרים. כולן יופיעו בכרטיס אחד, ומחליפים ביניהן בנקודות הצבע.</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">${Object.entries(METALS).map(([k, m]) => `<label class="chip" style="gap:6px;${have.has(k) ? 'opacity:.45' : ''}"><input type="checkbox" data-mk="${k}" ${have.has(k) ? 'disabled checked' : ['gold', 'champagne', 'silver'].includes(k) ? 'checked' : ''}><span class="cdot" style="background:${m.dot}"></span>${m.name}${have.has(k) ? ' ✓' : ''}</label>`).join('')}</div>
+    <div class="muted">מתאים למוצרי מתכת (פמוטים, ידיות, מנורות, ברזים). נרות וזכוכית נשארים כמו שהם.</div>
+    <button class="btn full" id="vGo" style="margin-top:10px">🎨 ליצור</button><div id="vSt" class="muted" style="text-align:center;margin-top:6px"></div>`, (b, close) => {
+    $('#vGo', b).onclick = async () => {
+      const keys = [...b.querySelectorAll('[data-mk]:checked:not(:disabled)')].map(x => x.dataset.mk); if (!keys.length) return toast('בוחרים צבע');
+      $('#vGo', b).disabled = true;
+      try { const made = await makeVariants(it, keys, m => { const e = $('#vSt', b); if (e) e.textContent = m; }); close(); toast(`נוצרו ${made.length} גרסאות צבע`); after && after(made); }
+      catch (e) { $('#vSt', b).textContent = e.message; $('#vGo', b).disabled = false; }
+    };
+  });
+}
+
 // =====================================================================
 // 📸 לנסות אצלי — מצלמים פינה בבית (או מצלמה חיה) ומניחים עליה מוצרים מהקטלוג
 // גרירה = הזזה · שתי אצבעות = הגדלה וסיבוב · הידית ↘ = הגדלה וסיבוב באצבע אחת
@@ -836,7 +954,7 @@ function tryAtHome(startIds = []) {
       <div style="font-size:44px">🛋️📸</div><div style="max-width:300px;color:#ddd">מצלמים את השולחן, הפינה או המדף — ואז בוחרים מוצרים מהסרגל בצד ומניחים אותם על התמונה.</div>
       <button class="btn" id="tCam">📷 מצלמה חיה</button><button class="btn sec" id="tShot">📸 לצלם תמונה</button><button class="btn sec" id="tGal">🖼️ תמונה מהגלריה</button></div></div>
     <div class="rail" id="tRail"></div></div>
-  <div class="sbar" id="tSbar"><button class="btn sec sm" data-s="flip">↔️ היפוך</button><button class="btn sec sm" data-s="front">⬆️ קדימה</button><button class="btn sec sm" data-s="dup">⧉ עוד אחד</button>
+  <div class="sbar" id="tSbar"><div id="tColors" style="width:100%;display:none;justify-content:center;gap:8px;align-items:center"></div><button class="btn sec sm" data-s="flip">↔️ היפוך</button><button class="btn sec sm" data-s="front">⬆️ קדימה</button><button class="btn sec sm" data-s="dup">⧉ עוד אחד</button>
     <label style="display:flex;align-items:center;gap:4px;font-size:12px">☀️<input type="range" id="tLight" min="55" max="135" value="100"></label>
     <label style="display:flex;align-items:center;gap:4px;font-size:12px">🌑<input type="range" id="tShadow" min="0" max="100" value="55"></label>
     <button class="btn danger sm" data-s="del" style="padding:7px 12px">🗑️ הסרה</button></div>`;
@@ -887,15 +1005,26 @@ function tryAtHome(startIds = []) {
   function selectStk(t) {
     sel = t; stks.forEach(x => x.el.classList.toggle('sel', x === t)); sbar.style.display = t ? 'flex' : 'none';
     if (t) { ov.querySelector('#tLight').value = t.light; ov.querySelector('#tShadow').value = t.shadow; }
+    const tc = ov.querySelector('#tColors'), sib = t ? siblings(t.it) : [];
+    if (t && sib.length > 1) {
+      tc.style.display = 'flex'; tc.innerHTML = '<span style="font-size:12px">🎨 צבע:</span>' + sib.map(x => `<span class="cdot${x.id === t.id ? ' on' : ''}" data-cv="${x.id}" title="${esc(x.color || '')}" style="background:${dotColor(x)};width:26px;height:26px"></span>`).join('');
+      tc.querySelectorAll('[data-cv]').forEach(dt => dt.onclick = async () => {
+        const v = S.catalog.find(x => x.id === dt.dataset.cv); if (!v || v.id === t.id) return;
+        const idx = stks.indexOf(t), st = { part: t.part ?? null, x: t.x, y: t.y, w: t.w, rot: t.rot, flip: t.flip, light: t.light, shadow: t.shadow };
+        const n = await mkStk(v, st); if (!n) return; stks.splice(stks.indexOf(n), 1); stks.splice(idx, 1, n); t.el.replaceWith(n.el); selectStk(n); record();
+      });
+    } else if (tc) tc.style.display = 'none';
     rail.querySelectorAll('.ri').forEach(r => r.classList.toggle('on', stks.some(s => s.id === r.dataset.id)));
   }
   // ↶ ↷ היסטוריית פעולות — ללא הגבלה
   const cutSrc = {}, HIST = [], hb = () => { ov.querySelector('#tUndo').disabled = hi <= 0; ov.querySelector('#tRedo').disabled = hi >= HIST.length - 1; };
   let hi = -1;
-  const snapS = () => JSON.stringify(stks.map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, rot: t.rot, flip: t.flip, light: t.light, shadow: t.shadow })));
+  const snapS = () => JSON.stringify(stks.map(t => ({ id: t.id, part: t.part ?? null, x: t.x, y: t.y, w: t.w, rot: t.rot, flip: t.flip, light: t.light, shadow: t.shadow })));
   function record() { const sn = snapS(); if (HIST[hi] === sn) return; HIST.length = hi + 1; HIST.push(sn); hi = HIST.length - 1; hb(); }
   async function mkStk(it, state) {
-    const cut = cutSrc[it.id] || (cutSrc[it.id] = await itemCutout(it)); if (!cut) return null;
+    const ck = it.id + '#' + (state.part ?? ''); let cut = cutSrc[ck];
+    if (!cut) { if (state.part != null) { const ps = await itemParts(it); cut = ps[state.part]?.url; } else cut = await itemCutout(it); cutSrc[ck] = cut; }
+    if (!cut) return null;
     const el = document.createElement('div'); el.className = 'stk'; el.innerHTML = `<img src="${cut}"><div class="hd">↘</div>`;
     const t = { id: it.id, it, el, x: .5, y: .55, w: .28, rot: 0, flip: false, light: 100, shadow: 55, ...state, el, it };
     wrap.appendChild(el); stks.push(t); await new Promise(r => { const i = el.querySelector('img'); i.complete ? r() : i.onload = r; }); place(t); bindStk(t); return t;
@@ -910,7 +1039,14 @@ function tryAtHome(startIds = []) {
   async function addStk(it, from) {
     if (!wrap) { toast('קודם מצלמים או בוחרים תמונה של המקום'); return; }
     if (hi < 0) record(); // מצב התחלתי (ריק)
-    const t = await mkStk(it, from ? { x: Math.min(.9, from.x + .06), y: from.y, w: from.w, rot: from.rot, flip: from.flip, light: from.light, shadow: from.shadow } : {});
+    if (!from) { // סט של כמה פריטים בתמונה אחת → בוחרים הכל או חלק, וכל פריט נפרד
+      const parts = await itemParts(it);
+      if (parts.length >= 2) {
+        const ch = await choosePartsDialog(it, parts); if (ch === undefined) return;
+        if (ch) { const W0 = 0.42; let last = null; for (const pi of ch) { const p = parts[pi]; last = await mkStk(it, { part: pi, x: .5 + (p.cx - .5) * W0, y: .55 + (p.cy - .5) * W0 * 0.8, w: p.w * W0 }); } if (last) selectStk(last); record(); return; }
+      }
+    }
+    const t = await mkStk(it, from ? { part: from.part ?? null, x: Math.min(.9, from.x + .06), y: from.y, w: from.w, rot: from.rot, flip: from.flip, light: from.light, shadow: from.shadow } : {});
     if (!t) return toast('אין תמונה למוצר הזה');
     selectStk(t); record();
   }
@@ -950,7 +1086,7 @@ function tryAtHome(startIds = []) {
   const projPicks = S.projects.flatMap(p => p.picks || []);
   const groups = [...new Set(all.map(x => x.sub || x.cat))];
   function drawRail(filter) {
-    const list = filter === '__mine' ? all.filter(x => startIds.includes(x.id) || projPicks.includes(x.id)) : filter ? all.filter(x => (x.sub || x.cat) === filter) : all;
+    const list = collapseGroups(filter === '__mine' ? all.filter(x => startIds.includes(x.id) || projPicks.includes(x.id)) : filter ? all.filter(x => (x.sub || x.cat) === filter) : all);
     rail.innerHTML = `<select id="tF"><option value="">הכל (${all.length})</option>${projPicks.length || startIds.length ? `<option value="__mine" ${filter === '__mine' ? 'selected' : ''}>⭐ מהפרויקטים</option>` : ''}${groups.map(g => `<option ${g === filter ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>` +
       list.map(it => `<div class="ri" data-id="${it.id}"><img src="${it.th || ''}"></div><div class="rn">${esc(it.name)}</div>`).join('') || '<div class="rn">אין מוצרים</div>';
     rail.querySelector('#tF').onchange = e => drawRail(e.target.value);
@@ -1654,7 +1790,7 @@ async function renderCatalog(app) {
   $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat, sub);
   $('#sortIn').onclick = () => sortInbox();
   $('#selMode').onclick = () => { CSEL.clear(); stay({ selMode: !V.selMode }); };
-  $('#openBook').onclick = () => flipbook(list, 0);
+  $('#openBook').onclick = () => flipbook(collapseGroups(list), 0);
   $('#tryHome').onclick = () => tryAtHome([]);
   selBar(list);
   if ($('#syncNow3')) $('#syncNow3').onclick = async () => { await Sync.run(true); render(); };
@@ -1663,9 +1799,9 @@ async function renderCatalog(app) {
   if ($('#editCat')) $('#editCat').onclick = () => catForm(cat);
   if ($('#syncNow')) $('#syncNow').onclick = () => Sync.run(true);
   const cl = $('#clist');
-  for (const it of list) {
+  for (const it of (V.selMode ? list : collapseGroups(list))) {
     const d = document.createElement('div'); d.className = 'sw';
-    d.innerHTML = `<div class="c"><img loading="lazy"></div>${it.review ? `<span class="flag">${it.pending ? '⏳' : '!'}</span>` : ''}${it.angles?.length ? `<span class="spin3d" title="${it.angles.length + 1} זוויות">🔄</span>` : ''}<div class="n">${esc(it.name)}</div>${it.sub && !V.subFilter ? `<div class="m">${esc(it.sub)}</div>` : ''}${it.model ? `<div class="m" dir="ltr">${esc(it.model)}</div>` : ''}`;
+    d.innerHTML = `<div class="c"><img loading="lazy"></div>${it.review ? `<span class="flag">${it.pending ? '⏳' : '!'}</span>` : ''}${it.angles?.length ? `<span class="spin3d" title="${it.angles.length + 1} זוויות">🔄</span>` : ''}<div class="n">${esc(siblings(it).length > 1 ? stripColor(it.name) : it.name)}</div>${dotsHTML(it)}${it.sub && !V.subFilter ? `<div class="m">${esc(it.sub)}</div>` : ''}${it.model ? `<div class="m" dir="ltr">${esc(it.model)}</div>` : ''}`;
     cl.appendChild(d);
     if (V.selMode && CSEL.has(it.id)) d.classList.add('picked');
     d.onclick = () => { if (!V.selMode) return itemForm(it); CSEL.has(it.id) ? CSEL.delete(it.id) : CSEL.add(it.id); d.classList.toggle('picked'); selBar(list); };
@@ -1883,6 +2019,7 @@ function itemForm(it, defCat, defSub) {
       <div id="angStrip" class="angstrip"></div>
       <div class="grid2" style="margin-top:8px"><button class="btn sec" id="pickI">📷 ${it ? 'החלפת תמונה' : 'תמונת המוצר'}</button>
         <button class="btn sec" id="addAng">🔄 + זוויות נוספות</button></div>
+      ${it ? `<div class="row" style="justify-content:center;gap:10px;margin-top:8px">${siblings(it).length > 1 ? `<span class="muted">צבעים:</span>${dotsHTML(it, it.id)}` : ''}<button class="btn sec sm" id="mkVar">🎨 גרסאות צבע</button></div>` : ''}
       <button class="btn full" id="aiId" style="margin-top:8px;${it?.img ? '' : 'display:none'}">🤖 זיהוי אוטומטי מהתמונה</button>
       <div id="aiMsg" class="muted" style="margin-top:6px"></div></div>
     ${it?.review ? `<div class="rule orange" style="margin-top:10px"><span class="dot orange"></span><div><b>⚠️ לבירור:</b><br>${(it.reviewWhy || []).map(esc).join('<br>')}
@@ -1903,6 +2040,10 @@ function itemForm(it, defCat, defSub) {
     <label>הערה</label><textarea id="ino">${esc(it?.note || '')}</textarea>
     <div style="height:14px"></div><button class="btn full" id="ok">שמירה</button>
     ${it ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקת המוצר</button>' : ''}`, async (b, close) => {
+    if (it) {
+      b.querySelectorAll('[data-vid]').forEach(dt => dt.onclick = () => { const v = S.catalog.find(x => x.id === dt.dataset.vid); if (v && v.id !== it.id) { close(); setTimeout(() => itemForm(v), 120); } });
+      const mv = b.querySelector('#mkVar'); if (mv) mv.onclick = () => variantsDialog(it, () => { close(); render(); setTimeout(() => itemForm(it), 150); });
+    }
     const ip = $('#ip', b);
     const fillSubs = (want) => { const l = subsOf($('#ic', b).value); $('#isub', b).innerHTML = `<option value="">—</option>` + l.map(x => `<option ${x === want ? 'selected' : ''}>${esc(x)}</option>`).join(''); $('#isub', b).disabled = !l.length; };
     fillSubs(it?.sub ?? defSub); $('#ic', b).onchange = () => fillSubs('');
