@@ -1105,6 +1105,110 @@ function floorCanvas(key) {
   } else { for (let i = 0; i < 4000; i++) { x.fillStyle = rnd(i) > .5 ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.06)'; x.fillRect(rnd(i * 2) * 512, rnd(i * 3) * 512, 3, 3); } }
   return c;
 }
+
+// ---------------- רהיטים אמיתיים בתלת־ממד (במקום קוביות) ----------------
+// כל רהיט נבנה מחלקים: רגליים, כריות, משענות, ידיות. יחידות: מטרים. הגב של הרהיט בצד -z, החזית ב-+z.
+const FMAT = {};
+function fmat(THREE, key) {
+  if (FMAT[key]) return FMAT[key];
+  const P = {
+    fabric: [0x8f8478, 0.95], fabric2: [0xa59a8c, 0.95], cushion: [0x9c9184, 0.95], linen: [0xece7df, 0.9], duvet: [0xd9cfc1, 0.9], pillow: [0xf4f1ec, 0.9],
+    wood: [0x9b7653, 0.6], woodDark: [0x5c4330, 0.55], woodLight: [0xc8a77f, 0.6], white: [0xf2f0ec, 0.5], cabinet: [0xe9e4dc, 0.55],
+    stone: [0xd8d4cd, 0.25], metal: [0x2b2b2b, 0.4], steel: [0xc9ccd0, 0.25], ceramic: [0xfbfbfa, 0.15], black: [0x111111, 0.3], screen: [0x0a0a0c, 0.15],
+    glass: [0xbfd9e6, 0.05], leather: [0x6b4a33, 0.6]
+  }[key] || [0x999999, 0.8];
+  const m = new THREE.MeshStandardMaterial({ color: P[0], roughness: P[1], metalness: ['metal', 'steel'].includes(key) ? 0.7 : 0 });
+  if (key === 'glass') { m.transparent = true; m.opacity = 0.28; }
+  return (FMAT[key] = m);
+}
+function makeFurn3D(THREE, f, d) {
+  const G = new THREE.Group(), W = f.w / 100, D = f.d / 100, H = d.h / 100, M = (k) => fmat(THREE, k);
+  const box = (w, h, dd, mat, x, y, z, ry = 0) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), typeof mat === 'string' ? M(mat) : mat); o.position.set(x, y + h / 2, z); o.rotation.y = ry; G.add(o); return o; };
+  const cyl = (rt, rb, h, mat, x, y, z, seg = 24) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), typeof mat === 'string' ? M(mat) : mat); o.position.set(x, y + h / 2, z); G.add(o); return o; };
+  const legs = (w, dd, h, mat = 'woodDark', r = 0.02, inset = 0.06) => { for (const sx of [-1, 1]) for (const sz of [-1, 1]) cyl(r, r * 0.8, h, mat, sx * (w / 2 - inset), 0, sz * (dd / 2 - inset), 10); };
+  const handle = (x, y, z, h = 0.12) => box(0.012, h, 0.02, 'steel', x, y, z);
+  const chair = (x, z, ry) => { // כיסא אוכל: מושב מרופד, משענת, 4 רגליים
+    const c = new THREE.Group(); const add = (o) => (c.add(o), o);
+    const mk = (w, h, dd, mat, px, py, pz) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), M(mat)); o.position.set(px, py + h / 2, pz); return add(o); };
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.012, 0.45, 8), M('woodDark')); l.position.set(sx * 0.18, 0.225, sz * 0.18); add(l); }
+    mk(0.44, 0.05, 0.44, 'fabric2', 0, 0.45, 0); mk(0.42, 0.42, 0.04, 'woodDark', 0, 0.5, -0.2);
+    for (const sx of [-1, 1]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.42, 8), M('woodDark')); l.position.set(sx * 0.19, 0.71, -0.2); add(l); }
+    c.position.set(x, 0, z); c.rotation.y = ry; G.add(c);
+  };
+  switch (f.type) {
+    case 'sofa3': case 'armchair': case 'armchairR': {
+      const arm = f.type === 'sofa3' ? 0.16 : 0.12, seatH = 0.42, legH = 0.08, n = f.type === 'sofa3' ? 3 : 1, fab = f.type === 'armchair' ? 'leather' : 'fabric';
+      legs(W - 0.1, D - 0.1, legH, 'woodDark', 0.018, 0.03);
+      box(W, seatH - legH - 0.1, D, fab, 0, legH, 0); // בסיס
+      const sw = (W - 2 * arm) / n;
+      for (let i = 0; i < n; i++) box(sw - 0.01, 0.12, D - 0.2, 'cushion', -W / 2 + arm + sw * (i + 0.5), seatH - 0.1, 0.07); // כריות ישיבה
+      box(W, 0.45, 0.16, fab, 0, seatH - 0.1, -D / 2 + 0.08); // משענת
+      for (let i = 0; i < n; i++) { const c = box(sw - 0.04, 0.38, 0.12, 'cushion', -W / 2 + arm + sw * (i + 0.5), seatH, -D / 2 + 0.2); c.rotation.x = -0.12; }
+      for (const sx of [-1, 1]) box(arm, 0.3, D, fab, sx * (W / 2 - arm / 2), seatH - 0.1, 0); // ידיות
+      if (f.type === 'sofa3') for (const sx of [-1, 1]) { const p = box(0.4, 0.32, 0.1, 'linen', sx * (W / 2 - arm - 0.25), seatH + 0.04, -D / 2 + 0.3); p.rotation.set(-0.2, sx * 0.25, sx * 0.1); }
+      break; }
+    case 'pouf': cyl(Math.min(W, D) / 2, Math.min(W, D) / 2, H - 0.04, 'fabric2', 0, 0.04, 0, 32); cyl(Math.min(W, D) / 2 - 0.01, Math.min(W, D) / 2 - 0.01, 0.04, 'woodDark', 0, 0, 0, 32); break;
+    case 'coffee': box(W, 0.04, D, 'woodLight', 0, H - 0.04, 0); box(W - 0.06, 0.02, D - 0.06, 'woodLight', 0, 0.12, 0); legs(W, D, H - 0.04, 'metal', 0.012, 0.03); break;
+    case 'tvunit': {
+      box(W, H - 0.1, D, 'cabinet', 0, 0.1, 0); legs(W, D, 0.1, 'metal', 0.012, 0.05);
+      const n = Math.max(2, Math.round(W / 0.6)); for (let i = 1; i < n; i++) box(0.006, H - 0.14, 0.004, 'woodLight', -W / 2 + (W / n) * i, 0.12, D / 2 + 0.001);
+      for (let i = 0; i < n; i++) handle(-W / 2 + (W / n) * (i + 0.5), H - 0.2, D / 2 + 0.012, 0.1);
+      box(W * 0.55, 0.02, 0.2, 'metal', 0, H, -D / 2 + 0.12); // מעמד
+      const tvW = Math.min(1.45, W * 0.75); box(tvW, tvW * 0.57, 0.03, 'black', 0, H + 0.02, -D / 2 + 0.12); box(tvW - 0.02, tvW * 0.57 - 0.02, 0.002, 'screen', 0, H + 0.03, -D / 2 + 0.136);
+      break; }
+    case 'bed2': case 'bed1': {
+      const fr = 0.3, mat = 0.22;
+      legs(W, D, 0.12, 'woodDark', 0.025, 0.06);
+      box(W, fr - 0.12, D, 'woodLight', 0, 0.12, 0); // מסגרת
+      box(W - 0.04, mat, D - 0.06, 'linen', 0, fr, 0.02); // מזרן
+      box(W - 0.02, 0.06, D * 0.68, 'duvet', 0, fr + mat - 0.02, D / 2 - D * 0.34 + 0.01); // שמיכה
+      box(W + 0.02, 0.05, D * 0.68 - 0.02, 'duvet', 0, fr + mat - 0.1, D / 2 - D * 0.34 + 0.015);
+      box(W + 0.06, 0.75, 0.08, 'fabric2', 0, fr - 0.1, -D / 2 - 0.02); // ראש מיטה
+      const np = f.type === 'bed2' ? 2 : 1; for (let i = 0; i < np; i++) { const p = box(W / np - 0.12, 0.13, 0.38, 'pillow', -W / 2 + (W / np) * (i + 0.5), fr + mat, -D / 2 + 0.28); p.rotation.x = -0.15; }
+      break; }
+    case 'wardrobe': {
+      box(W, H - 0.08, D, 'cabinet', 0, 0.08, 0); box(W - 0.04, 0.08, D - 0.04, 'woodDark', 0, 0, 0);
+      const n = Math.max(2, Math.round(W / 0.5)); for (let i = 1; i < n; i++) box(0.005, H - 0.12, 0.004, 'woodLight', -W / 2 + (W / n) * i, 0.1, D / 2 + 0.001);
+      for (let i = 0; i < n; i++) handle(-W / 2 + (W / n) * (i + 0.5) + (i % 2 ? -0.04 : 0.04), 1.0, D / 2 + 0.012, 0.3);
+      break; }
+    case 'dining6': case 'dining4sq': case 'dining4r': {
+      const round = f.type === 'dining4r';
+      if (round) { cyl(W / 2, W / 2, 0.04, 'woodLight', 0, H - 0.04, 0, 48); cyl(0.06, 0.08, H - 0.06, 'woodDark', 0, 0.02, 0, 16); cyl(0.3, 0.32, 0.03, 'woodDark', 0, 0, 0, 32); }
+      else { box(W, 0.045, D, 'woodLight', 0, H - 0.045, 0); legs(W, D, H - 0.045, 'woodDark', 0.03, 0.08); }
+      const pts = f.type === 'dining6' ? [-1, 0, 1].flatMap(i => [[i * W / 3, -D / 2 - 0.12, 0], [i * W / 3, D / 2 + 0.12, Math.PI]]) : [[0, -D / 2 - 0.12, 0], [0, D / 2 + 0.12, Math.PI], [-W / 2 - 0.12, 0, Math.PI / 2], [W / 2 + 0.12, 0, -Math.PI / 2]];
+      for (const [x, z, ry] of pts) chair(x, z, ry + Math.PI); // הכיסא פונה לשולחן
+      // כלי שולחן: אגרטל באמצע
+      cyl(0.05, 0.04, 0.22, 'ceramic', 0, H, 0, 16);
+      break; }
+    case 'counter': case 'island': {
+      const top = 0.04, kick = 0.1;
+      box(W - 0.02, H - top - kick, D - 0.04, 'cabinet', 0, kick, f.type === 'island' ? 0 : 0.02); box(W - 0.06, kick, D - 0.1, 'black', 0, 0, 0);
+      box(W, top, D + (f.type === 'island' ? 0.25 : 0.02), 'stone', 0, H - top, f.type === 'island' ? 0.1 : 0.01);
+      const n = Math.max(2, Math.round(W / 0.6)); for (let i = 1; i < n; i++) box(0.005, H - top - kick - 0.02, 0.004, 'woodLight', -W / 2 + (W / n) * i, kick + 0.01, D / 2 + 0.001);
+      for (let i = 0; i < n; i++) box(0.3, 0.012, 0.02, 'steel', -W / 2 + (W / n) * (i + 0.5), H - top - 0.08, D / 2 + 0.012);
+      if (f.type === 'counter') { box(0.5, 0.01, 0.38, 'steel', W * 0.2, H, 0); cyl(0.012, 0.012, 0.28, 'steel', W * 0.2, H, -0.2, 8); box(0.02, 0.02, 0.18, 'steel', W * 0.2, H + 0.27, -0.12); }
+      else for (const sx of [-1, 1]) { cyl(0.17, 0.17, 0.05, 'leather', sx * W * 0.25, 0.65, D / 2 + 0.3, 20); cyl(0.02, 0.02, 0.65, 'metal', sx * W * 0.25, 0, D / 2 + 0.3, 8); cyl(0.18, 0.2, 0.02, 'metal', sx * W * 0.25, 0, D / 2 + 0.3, 20); }
+      break; }
+    case 'fridge': box(W, H, D, 'steel', 0, 0, 0); box(W - 0.01, 0.006, 0.006, 'black', 0, H * 0.62, D / 2 + 0.002); for (const y of [H * 0.75, H * 0.35]) box(0.025, 0.35, 0.03, 'black', W / 2 - 0.08, y, D / 2 + 0.02); break;
+    case 'sinkR': case 'sinkRect': {
+      box(W + 0.1, 0.5, D, 'woodLight', 0, 0.3, 0); box(W + 0.1, 0.005, 0.004, 'woodDark', 0, 0.55, D / 2 + 0.001);
+      if (f.type === 'sinkR') cyl(W / 2, W / 2.4, 0.14, 'ceramic', 0, 0.8, 0.02, 32); else box(W, 0.14, D - 0.05, 'ceramic', 0, 0.8, 0.02);
+      cyl(0.015, 0.015, 0.25, 'steel', 0, 0.8, -D / 2 + 0.04, 10); box(0.025, 0.025, 0.14, 'steel', 0, 1.03, -D / 2 + 0.1);
+      break; }
+    case 'shower': box(W, 0.05, D, 'ceramic', 0, 0, 0); box(W, 2.0, 0.01, 'glass', 0, 0.05, D / 2); box(0.01, 2.0, D, 'glass', W / 2, 0.05, 0); cyl(0.11, 0.11, 0.02, 'steel', 0, 2.0, -D / 2 + 0.25, 24); cyl(0.01, 0.01, 0.35, 'steel', 0, 1.67, -D / 2 + 0.05, 8); break;
+    case 'bath': {
+      box(W, H, D, 'ceramic', 0, 0, 0); box(W - 0.12, 0.02, D - 0.12, new THREE.MeshStandardMaterial({ color: 0xe8ecef, roughness: 0.1 }), 0, H - 0.015, 0);
+      cyl(0.015, 0.015, 0.15, 'steel', -W / 2 + 0.08, H, 0, 8); box(0.12, 0.02, 0.02, 'steel', -W / 2 + 0.12, H + 0.14, 0, Math.PI / 2);
+      break; }
+    case 'toilet': {
+      box(W - 0.02, 0.38, 0.17, 'ceramic', 0, 0.38, -D / 2 + 0.09); // מיכל
+      const bowl = cyl(0.19, 0.14, 0.4, 'ceramic', 0, 0, 0.06, 28); bowl.scale.z = 1.3;
+      const seat = cyl(0.2, 0.2, 0.025, 'white', 0, 0.4, 0.06, 28); seat.scale.z = 1.3;
+      break; }
+    default: { const o = d.round ? cyl(W / 2, W / 2, H, new THREE.MeshStandardMaterial({ color: d.c3, roughness: 0.8 }), 0, 0, 0) : box(W, H, D, new THREE.MeshStandardMaterial({ color: d.c3, roughness: 0.8 }), 0, 0, 0); }
+  }
+  return G;
+}
 async function open3D(plan) {
   if (!plan.walls.length) return toast('קודם משרטטים קירות');
   plan.mat = plan.mat || { floor: 'oak', wall: '#efeae3' };
@@ -1113,7 +1217,7 @@ async function open3D(plan) {
     <div id="c3" style="position:absolute;inset:0"></div>
     <div style="position:absolute;top:calc(10px + var(--safe-t));right:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap;z-index:2">
       <button class="btn sm" id="x3">✕ סגירה</button>
-      <button class="btn sec sm" id="mOrbit">🔄 מבט על</button><button class="btn sec sm" id="mWalk">🚶 הליכה</button>
+      <button class="btn sec sm" id="mOrbit">🔄 מבט על</button><button class="btn sec sm" id="mWalk">🚶 הליכה</button><button class="btn sec sm" id="mCut">🧱 קירות מלאים</button>
       <button class="btn sm" id="mAdd">➕ הוספה</button><button class="btn sec sm" id="mMat">🎨 חומרים</button><button class="btn sec sm" id="mTour">🎬 סרטון סיור</button><button class="btn sec sm" id="mRec">⏺️ הקלטה</button>
       ${plan.original ? '<button class="btn sec sm" id="mBA">לפני / אחרי</button>' : ''}</div>
     <div id="joy" style="position:absolute;bottom:calc(24px + var(--safe-b));left:24px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.35);border:2px solid rgba(255,255,255,.8);display:none;z-index:2;touch-action:none">
@@ -1132,7 +1236,10 @@ async function open3D(plan) {
   const box = $('#c3', m);
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
   if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.localClippingEnabled = true;
+  // "בית בובות": במבט על הקירות חתוכים בגובה 1.1 מ' כדי לראות את הרהיטים; בהליכה — קירות מלאים
+  const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1.1); let cutOn = true; const wallMats = [];
+  const applyCut = () => wallMats.forEach(mm => { mm.clippingPlanes = cutOn && !walking ? [cutPlane] : []; mm.needsUpdate = true; });
   renderer.setSize(box.clientWidth, box.clientHeight); box.appendChild(renderer.domElement);
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0xe9e4dc);
   const camera = new THREE.PerspectiveCamera(60, box.clientWidth / box.clientHeight, 0.05, 500);
@@ -1162,7 +1269,7 @@ async function open3D(plan) {
     walls2 = [];
     const xs = pl.walls.flatMap(w => [w.x1, w.x2]), ys = pl.walls.flatMap(w => [w.y1, w.y2]);
     const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
-    const FW = (maxx - minx) / 100 + 1, FD = (maxy - miny) / 100 + 1;
+    const FW = (maxx - minx) / 100 + 0.3, FD = (maxy - miny) / 100 + 0.3;
     const fm = await floorMaterial(); const tm = fm.map.userData.meters; fm.map.repeat.set(FW / tm, FD / tm);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(FW, FD), fm); floor.receiveShadow = true;
     floor.rotation.x = -Math.PI / 2; floor.position.set((minx + maxx) / 200, 0, (miny + maxy) / 200); group.add(floor);
@@ -1170,12 +1277,13 @@ async function open3D(plan) {
     ceiling.rotation.x = Math.PI / 2; ceiling.position.set((minx + maxx) / 200, H, (miny + maxy) / 200); ceiling.visible = walking; group.add(ceiling);
     sun.position.set((minx + maxx) / 200 + 6, 12, (miny + maxy) / 200 + 4); sun.target.position.set((minx + maxx) / 200, 0, (miny + maxy) / 200);
     const ext = Math.max(FW, FD); Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, far: 60 }); sun.shadow.camera.updateProjectionMatrix();
+    wallMats.length = 0;
     const glass = new THREE.MeshStandardMaterial({ color: 0x9ec9e8, transparent: true, opacity: 0.3, roughness: 0.05 });
-    const frameM = new THREE.MeshStandardMaterial({ color: 0x5b4a3c, roughness: 0.6 });
+    const frameM = new THREE.MeshStandardMaterial({ color: 0x5b4a3c, roughness: 0.6 }); wallMats.push(glass, frameM);
     for (const w of pl.walls) {
       const L = len(w) / 100, ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1), T = w.thick / 100;
       const custom = w.type === 'interior' || w.type === 'exterior' || w.type === 'unknown' || !w.type;
-      const mat = new THREE.MeshStandardMaterial({ color: custom ? new THREE.Color(plan.mat.wall) : (WALL_TYPES[w.type] || WALL_TYPES.interior).c3, roughness: 0.9 });
+      const mat = new THREE.MeshStandardMaterial({ color: custom ? new THREE.Color(plan.mat.wall) : (WALL_TYPES[w.type] || WALL_TYPES.interior).c3, roughness: 0.9, side: THREE.DoubleSide }); wallMats.push(mat);
       const ops = pl.openings.filter(o => o.wallId === w.id).map(o => ({ a: (o.pos - o.width / 2) / 100, b: (o.pos + o.width / 2) / 100, bot: (o.kind === 'door' ? 0 : o.sill) / 100, top: ((o.kind === 'door' ? 0 : o.sill) + o.height) / 100, kind: o.kind })).sort((p, q) => p.a - q.a);
       walls2.push({ x1: w.x1 / 100, z1: w.y1 / 100, x2: w.x2 / 100, z2: w.y2 / 100, T, L, doors: ops.filter(o => o.kind === 'door') });
       const piece = (s0, s1, y0, y1, material = mat, thick = T) => {
@@ -1199,6 +1307,7 @@ async function open3D(plan) {
       }
       piece(s, L, 0, H);
     }
+    applyCut();
     return { cx: (minx + maxx) / 200, cz: (miny + maxy) / 200, size: Math.max(maxx - minx, maxy - miny) / 100, minx: minx / 100, maxx: maxx / 100, minz: miny / 100, maxz: maxy / 100 };
   }
   const furnGroups = new Map(); // id → קבוצה בתלת־ממד
@@ -1222,13 +1331,9 @@ async function open3D(plan) {
         if (tex) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.08 })); const w = f.w / 100; sp.center.set(0.5, 0); sp.scale.set(w, w * tex.userData.ar, 1); sp.userData.fid = f.id; g.add(sp); }
         placeGroup(g, f); g.rotation.y = 0; group.add(g); continue;
       }
-      const mat = new THREE.MeshStandardMaterial({ color: d.c3, roughness: 0.8 });
-      const geo = d.round ? new THREE.CylinderGeometry(f.w / 200, f.w / 200, d.h / 100, 32) : new THREE.BoxGeometry(f.w / 100, d.h / 100, f.d / 100);
-      const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = mesh.receiveShadow = true; mesh.position.y = d.h / 200; mesh.userData.fid = f.id; g.add(mesh);
-      if (d.chairs) { const cm = new THREE.MeshStandardMaterial({ color: 0x6f5a48, roughness: 0.8 });
-        const pts = d.chairs === 6 ? [-1, 0, 1].flatMap(i => [[i * f.w / 3, -f.d / 2 - 15], [i * f.w / 3, f.d / 2 + 15]]) : [[0, -f.d / 2 - 15], [0, f.d / 2 + 15], [-f.w / 2 - 15, 0], [f.w / 2 + 15, 0]];
-        for (const [lx, ly] of pts) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), cm); c.castShadow = true; c.position.set(lx / 100, 0.225, ly / 100); c.userData.fid = f.id; g.add(c); }
-      }
+      const model = makeFurn3D(THREE, f, d);
+      model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.userData.fid = f.id; } });
+      g.add(model);
       placeGroup(g, f); group.add(g);
     }
   }
@@ -1284,16 +1389,17 @@ async function open3D(plan) {
     J.style.display = 'none'; $('#hint3', m).style.display = 'none';
     controls.minDistance = 0.5; controls.maxDistance = 200; controls.enablePan = true; controls.maxPolarAngle = Math.PI / 2.05;
     camera.position.set(info.cx + info.size * 0.6, info.size * 0.9 + 3, info.cz + info.size * 0.9);
-    controls.target.set(info.cx, 0, info.cz); controls.update();
+    controls.target.set(info.cx, 0, info.cz); controls.update(); applyCut();
   }
   function walk() {
     walking = true; if (ceiling) ceiling.visible = true; controls.enabled = false;
     J.style.display = 'block'; $('#hint3', m).style.display = 'block'; setTimeout(() => { const h = $('#hint3', m); if (h) h.style.display = 'none'; }, 5000);
     amb.intensity = 0.45; lamp.intensity = 1.2; camera.fov = walkFov(); camera.updateProjectionMatrix();
-    const [x, z, y] = startPoint(); camera.position.set(x, 1.6, z); yaw = y; pitch = 0; applyLook();
+    const [x, z, y] = startPoint(); camera.position.set(x, 1.6, z); yaw = y; pitch = 0; applyLook(); applyCut();
   }
   orbit();
   $('#mOrbit', m).onclick = orbit; $('#mWalk', m).onclick = walk;
+  $('#mCut', m).onclick = () => { cutOn = !cutOn; applyCut(); $('#mCut', m).textContent = cutOn ? '🧱 קירות מלאים' : '✂️ קירות חתוכים'; };
   if ($('#mBA', m)) $('#mBA', m).onclick = async () => {
     showing = showing === plan ? plan.original : plan; info = await build(showing);
     const l = $('#ba3', m); l.style.display = ''; l.textContent = showing === plan ? 'אחרי (תכנון)' : 'לפני (מצב קיים)';
@@ -1430,7 +1536,7 @@ async function open3D(plan) {
       const t = (now - t0) / 1000;
       if (t < 9) { yaw = y0 + (t / 9) * Math.PI * 2; pitch = -0.05; camera.position.set(x0, 1.6, z0); applyLook(); }
       else if (t < 17) {
-        if (walking) { walking = false; ceiling.visible = false; amb.intensity = 0.25; lamp.intensity = 0; }
+        if (walking) { walking = false; ceiling.visible = false; amb.intensity = 0.25; lamp.intensity = 0; applyCut(); }
         const k = (t - 9) / 8, e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2, a = y0 + Math.PI * 2 + e * Math.PI * 1.2;
         const R = info.size * (0.3 + e * 0.6), hgt = 1.6 + e * (info.size * 0.9 + 2);
         camera.position.set(info.cx + Math.sin(a) * R, hgt, info.cz + Math.cos(a) * R); camera.lookAt(info.cx, 0.5, info.cz);
