@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.0.2';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -631,7 +631,6 @@ function flipbook(list, start = 0, projectId = '') {
       const im = d.querySelector('img'); if (it.th) im.src = it.th;
       const full = await getImg(it.img) || await Sync.fetchImg(it.img); const srcs = [full || it.th, ...(await loadImgs(it.angles || []))].filter(Boolean);
       if (srcs.length > 1) attachSpin(im, srcs); else if (full) im.src = full;
-      im.ondblclick = () => zoomView(im.src);
     })();
     return d;
   };
@@ -666,8 +665,19 @@ function flipbook(list, start = 0, projectId = '') {
     busy = true; prepUnder(ni); i = ni; const dirSign = step * sideNext();
     setAngle(cur, dirSign, 0); requestAnimationFrame(() => finish(dirSign, 1, true));
   };
+  // צביטה בשתי אצבעות על הדף = הגדלה (לחיצה כפולה לא מגדילה — כדי לא להפריע לדפדוף)
+  const fpts = new Map(); let pinch0 = 0;
+  stage.addEventListener('pointerdown', e => { fpts.set(e.pointerId, [e.clientX, e.clientY]); if (fpts.size === 2) { const [a, b] = [...fpts.values()]; pinch0 = Math.hypot(a[0] - b[0], a[1] - b[1]); } }, true);
+  stage.addEventListener('pointermove', e => {
+    if (!fpts.has(e.pointerId)) return; fpts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (fpts.size === 2 && pinch0) { const [a, b] = [...fpts.values()]; if (Math.hypot(a[0] - b[0], a[1] - b[1]) - pinch0 > 40) {
+      pinch0 = 0; fpts.clear(); if (drag) { const d = drag; drag = null; if (d.dir) finish(d.dir, d.k, false); }
+      const im = cur.querySelector('img'); if (im?.src) zoomView(im.src); } }
+  }, true);
+  const fup = e => { fpts.delete(e.pointerId); if (fpts.size < 2) pinch0 = 0; };
+  stage.addEventListener('pointerup', fup, true); stage.addEventListener('pointercancel', fup, true);
   stage.addEventListener('pointerdown', e => {
-    if (busy || !e.isPrimary) return;
+    if (busy || !e.isPrimary || fpts.size > 1) return;
     const it = list[i]; if (it.angles?.length && e.target.closest('.fb-img')) return; // על מוצר עם זוויות — הגרירה מסובבת אותו
     drag = { x: e.clientX, dir: 0, ni: null, k: 0 }; stage.setPointerCapture(e.pointerId);
   });
@@ -895,12 +905,11 @@ function tryAtHome(startIds = []) {
 // 🔍 הגדלה: צביטה / גלגלת / לחיצה כפולה, וגרירה
 function zoomView(src) {
   const z = document.createElement('div'); z.id = 'zoomv';
-  z.innerHTML = `<img src="${src}"><button class="fb-x" style="position:absolute;top:14px;left:14px">✕</button><div class="muted" style="position:absolute;bottom:18px;width:100%;text-align:center;color:#ddd">צובטים להגדלה · גוררים להזזה · לחיצה כפולה לאיפוס</div>`;
+  z.innerHTML = `<img src="${src}"><button class="fb-x" style="position:absolute;top:14px;left:14px">✕</button><div class="muted" style="position:absolute;bottom:18px;width:100%;text-align:center;color:#ddd">צובטים להגדלה · גוררים להזזה</div>`;
   document.body.appendChild(z);
   const im = z.querySelector('img'); let sc = 1, tx = 0, ty = 0; const pts = new Map(); let d0 = 0, s0 = 1, last = null;
   const ap = () => im.style.transform = `translate(${tx}px,${ty}px) scale(${sc})`;
   z.querySelector('button').onclick = () => z.remove();
-  im.ondblclick = () => { sc = sc > 1 ? 1 : 2.5; tx = ty = 0; ap(); };
   z.onwheel = (e) => { e.preventDefault(); sc = Math.min(6, Math.max(1, sc * (e.deltaY < 0 ? 1.15 : 0.87))); ap(); };
   im.onpointerdown = (e) => { im.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]); if (pts.size === 2) { const [a, b] = [...pts.values()]; d0 = Math.hypot(a[0] - b[0], a[1] - b[1]); s0 = sc; } last = [e.clientX, e.clientY]; };
   im.onpointermove = (e) => {
