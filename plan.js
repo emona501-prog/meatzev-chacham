@@ -1303,6 +1303,13 @@ async function open3D(plan) {
         const fT = T + 0.02, fw = 0.05;
         piece(o.a - fw, o.a, o.bot, Math.min(o.top, H), frameM, fT); piece(o.b, o.b + fw, o.bot, Math.min(o.top, H), frameM, fT);
         if (o.top < H) piece(o.a - fw, o.b + fw, o.top, Math.min(o.top + fw, H), frameM, fT);
+        if (o.kind === 'door') { // כנף דלת פתוחה חלקית + ידית
+          const hg = new THREE.Group(); hg.position.set(w.x1 / 100 + Math.cos(ang) * o.a, 0, w.y1 / 100 + Math.sin(ang) * o.a); hg.rotation.y = -ang - 1.15;
+          const leafW = o.b - o.a, leafH = Math.min(o.top, H) - 0.01, leaf = new THREE.Mesh(new THREE.BoxGeometry(leafW, leafH, 0.04), (() => { const lm = fmat(THREE, 'woodLight').clone(); wallMats.push(lm); return lm; })());
+          leaf.position.set(leafW / 2, leafH / 2, 0); leaf.castShadow = true; hg.add(leaf);
+          for (const sz of [-1, 1]) { const hd = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.02), fmat(THREE, 'steel')); hd.position.set(leafW - 0.1, 1.0, sz * 0.035); hg.add(hd); }
+          group.add(hg);
+        } else if (o.bot > 0) piece(o.a - 0.03, o.b + 0.03, o.bot - 0.03, o.bot, fmat(THREE, 'stone'), T + 0.06); // אדן חלון
         s = Math.max(s, o.b);
       }
       piece(s, L, 0, H);
