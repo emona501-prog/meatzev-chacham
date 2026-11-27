@@ -210,5 +210,10 @@ window.PLAN_RULES = {
     interior: { name: 'קיר פנימי (גבס/בלוק)', open: 'green', change: 'green', remove: 'green' }
   },
   furn: { bedSide: 60, bedFront: 80, dining: 90, island: 90, islandMax: 120, wardrobeFront: 60 },
-  open: { doorW: 90, doorH: 210, winW: 120, winH: 120, winSill: 90 }
+  open: { doorW: 90, doorH: 210, winW: 120, winH: 120, winSill: 90 },
+  // עובי קירות תקני (ס"מ). בקנה מידה 1:50 כל שנתה בסרגל = 5 ס"מ → 10=2 שנתות, 15=3, 20=4, 25=5, 30=6
+  thick: [10, 15, 20, 25, 30],
+  // קנה מידה: כמה ס"מ במציאות שווה כל פס (שנתה) בסרגל. 1:20 → כל פס 2 ס"מ · 1:50 → כל פס 5 ס"מ · 1:100 → כל פס 10 ס"מ
+  // משפיע על הסרגלים, על ההצמדה בזמן שרטוט (דיוק) ועל ספירת השנתות של עובי הקיר
+  ticks: { 20: 2, 50: 5, 100: 10 }
 };

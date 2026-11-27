@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.1.2';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -2265,7 +2265,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 // כללים (ספר הכללים)
 // =====================================================================
 // 📐 כללי שרטוט — מתוך ספר הכללים; חלים על השרטוט, התלת־ממד, האזהרות וה-AI
-function planRulesNow() { const b = window.PLAN_RULES, c = (S.custom && S.custom.plan) || {}; const walls = {}; for (const k of Object.keys(b.walls)) walls[k] = { ...b.walls[k], ...((c.walls || {})[k] || {}) }; return { walls, furn: { ...b.furn, ...(c.furn || {}) }, open: { ...b.open, ...(c.open || {}) } }; }
+function planRulesNow() { const b = window.PLAN_RULES, c = (S.custom && S.custom.plan) || {}; const walls = {}; for (const k of Object.keys(b.walls)) walls[k] = { ...b.walls[k], ...((c.walls || {})[k] || {}) }; return { walls, furn: { ...b.furn, ...(c.furn || {}) }, open: { ...b.open, ...(c.open || {}) }, thick: c.thick || b.thick || [10, 15, 20, 25, 30], ticks: { ...(b.ticks || {}), ...(c.ticks || {}) } }; }
 function planRuleLines() { // אותם כללים בדיוק — גם להנחיות ה-AI
   const p = planRulesNow(), L = { red: 'אסור', orange: 'מותר רק עם בדיקה של איש מקצוע', green: 'מותר' }, out = [];
   out.push({ level: 'orange', text: 'כללי השרטוט הבאים הם העדכניים — אם הם סותרים כלל אחר, הם גוברים.' });
@@ -2274,6 +2274,7 @@ function planRuleLines() { // אותם כללים בדיוק — גם להנחי
     out.push({ level: worst, text: `${r.name}: פתיחת פתח — ${L[r.open]}; הזזה/שינוי — ${L[r.change]}; הריסה — ${L[r.remove]}.${k === 'mamad' ? ` עד ${r.maxDoors} דלת ו-${r.maxWindows} חלון בכל קיר; מעבר לזה — ${L[r.extra]}.` : ''}` });
   }
   const f = p.furn; out.push({ level: 'green', text: `מרווחים: ${f.bedSide} ס"מ בצדי מיטה, ${f.bedFront} ס"מ מול מיטה, ${f.dining} ס"מ סביב שולחן אוכל, ${f.island}–${f.islandMax} ס"מ סביב אי, ${f.wardrobeFront} ס"מ מול ארון.` });
+  out.push({ level: 'orange', text: `עובי קיר תמיד אחד מ: ${p.thick.join(', ')} ס"מ. קנה מידה: ${Object.entries(p.ticks).map(([k, v]) => `1:${k} — כל פס בסרגל = ${v} ס"מ`).join(' · ')} (למשל ב-1:50 קיר 15 = ${15 / (p.ticks[50] || 5)} פסים).` });
   out.push({ level: 'green', text: `ברירת מחדל: דלת ${p.open.doorW}×${p.open.doorH} ס"מ, חלון ${p.open.winW}×${p.open.winH} ס"מ בגובה ${p.open.winSill} ס"מ מהרצפה.` });
   return out;
 }
@@ -2289,6 +2290,11 @@ function planRulesCard(ed) {
         : `<br>פתח — ${L[r.open]} · שינוי — ${L[r.change]} · הריסה — ${L[r.remove]}${k === 'mamad' ? ` · עד ${r.maxDoors} דלת ו-${r.maxWindows} חלון בקיר` : ''}`}</div></div>`).join('')}
     <h3 style="margin-top:12px">↔️ מרווחים סביב רהיטים (ס"מ)</h3>
     <div class="grid2">${num('furn', 'bedSide', p.furn.bedSide, 'צדי מיטה')}${num('furn', 'bedFront', p.furn.bedFront, 'מול מיטה')}${num('furn', 'dining', p.furn.dining, 'סביב שולחן אוכל')}${num('furn', 'wardrobeFront', p.furn.wardrobeFront, 'מול ארון')}${num('furn', 'island', p.furn.island, 'סביב אי — מינ׳')}${num('furn', 'islandMax', p.furn.islandMax, 'סביב אי — מקס׳')}</div>
+    <h3 style="margin-top:12px">📏 קנה מידה ועובי קירות</h3>
+    <div class="muted" style="margin-bottom:6px">כמה ס"מ שווה כל פס בסרגל. קובע את הסרגלים, את ההצמדה בזמן שרטוט ואת ספירת הפסים של העובי.</div>
+    <div class="grid2">${Object.entries(p.ticks).map(([k, v]) => `<div><label>1:${k} — כל פס =</label><input type="number" inputmode="decimal" data-pt="${k}" value="${v}" ${ed ? '' : 'disabled'}></div>`).join('')}
+      <div><label>עוביי קיר תקניים (ס"מ)</label><input data-pth value="${p.thick.join(', ')}" ${ed ? '' : 'disabled'}></div></div>
+    <div class="muted" style="font-size:12px;margin-top:4px">${p.thick.map(t => `${t}=${+(t / (p.ticks[50] || 5)).toFixed(1)} פסים`).join(' · ')} (ב-1:50)</div>
     <h3 style="margin-top:12px">🚪 מידות ברירת מחדל לפתחים (ס"מ)</h3>
     <div class="grid2">${num('open', 'doorW', p.open.doorW, 'רוחב דלת')}${num('open', 'doorH', p.open.doorH, 'גובה דלת')}${num('open', 'winW', p.open.winW, 'רוחב חלון')}${num('open', 'winH', p.open.winH, 'גובה חלון')}${num('open', 'winSill', p.open.winSill, 'גובה חלון מהרצפה')}</div>
     ${ed ? '' : '<div class="muted" style="margin-top:6px">לשינוי: "✏️ עריכה" למעלה.</div>'}</div>`;
@@ -2297,6 +2303,8 @@ function bindPlanRules(app) {
   const C = () => { const c = editableRules(); c.plan = c.plan || { walls: {}, furn: {}, open: {} }; c.plan.walls = c.plan.walls || {}; c.plan.furn = c.plan.furn || {}; c.plan.open = c.plan.open || {}; return c.plan; };
   app.querySelectorAll('[data-pw]').forEach(el => el.onchange = () => { const [k, act] = el.dataset.pw.split('|'), p = C(); p.walls[k] = { ...(p.walls[k] || {}), [act]: el.value }; rulesChanged(); toast('הכלל עודכן — חל עכשיו בכל האפליקציה'); render(); });
   app.querySelectorAll('[data-pm]').forEach(el => el.onchange = () => { const p = C(), v = Math.max(0, +el.value || 0); p.walls.mamad = { ...(p.walls.mamad || {}), [el.dataset.pm]: v }; rulesChanged(); toast('הכלל עודכן'); });
+  app.querySelectorAll('[data-pt]').forEach(el => el.onchange = () => { const p = C(), v = +el.value; if (!(v > 0)) return; p.ticks = { ...(p.ticks || {}), [el.dataset.pt]: v }; rulesChanged(); toast(`1:${el.dataset.pt} — כל פס = ${v} ס"מ`); render(); });
+  app.querySelectorAll('[data-pth]').forEach(el => el.onchange = () => { const a = el.value.split(/[ ,]+/).map(Number).filter(v => v > 0).sort((x, y) => x - y); if (!a.length) return; C().thick = a; rulesChanged(); toast('עוביי הקיר עודכנו'); render(); });
   app.querySelectorAll('[data-pn]').forEach(el => el.onchange = () => { const [g, k] = el.dataset.pn.split('|'), p = C(), v = +el.value; if (!(v >= 0)) return; p[g][k] = v; rulesChanged(); toast('הכלל עודכן'); });
 }
 function renderRules(app) {

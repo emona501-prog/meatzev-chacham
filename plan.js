@@ -79,10 +79,15 @@ function chairSvgSide(x, cy, right) {
   return `<g stroke-dasharray="3 2">${R(x0, cy - cd / 2, cw, cd, 3)}</g>` + R(right ? x0 + cw : x0 - 7, cy - cd / 2, 7, cd);
 }
 // 📐 כללי השרטוט נקראים תמיד מספר הכללים (לשונית "כללים") — שינוי שם חל כאן מיד
+// עובי תקני: מצמידים לערך הקרוב ברשימה (10/15/20/25/30). ב-1:50: עובי ÷ 5 = מספר השנתות בסרגל
+function thickStd() { const a = (PR().thick || [10, 15, 20, 25, 30]).map(Number).filter(v => v > 0).sort((p, q) => p - q); return a.length ? a : [10, 15, 20, 25, 30]; }
+// כמה ס"מ כל פס בסרגל בקנה המידה הנוכחי (ברירת מחדל: 1:50 → 5)
+function scaleTick(sc) { sc = sc || AID().scale || 50; const t = PR().ticks || {}; return +t[sc] || Math.max(1, Math.round(sc / 10)); }
+function snapThick(cm) { const a = thickStd(); return a.reduce((p, q) => Math.abs(q - cm) < Math.abs(p - cm) ? q : p); }
 function PR() {
   const base = window.PLAN_RULES, c = (typeof S !== 'undefined' && S.custom && S.custom.plan) || {};
   const walls = {}; for (const k of Object.keys(base.walls)) walls[k] = { ...base.walls[k], ...((c.walls || {})[k] || {}) };
-  return { walls, furn: { ...base.furn, ...(c.furn || {}) }, open: { ...base.open, ...(c.open || {}) } };
+  return { walls, furn: { ...base.furn, ...(c.furn || {}) }, open: { ...base.open, ...(c.open || {}) }, thick: c.thick || base.thick, ticks: { ...(base.ticks || {}), ...(c.ticks || {}) } };
 }
 const WR = (w) => PR().walls[w.type || 'unknown'] || PR().walls.unknown;
 // כללי מרווח לריהוט — המספרים מספר הכללים
@@ -169,7 +174,7 @@ function hitOpening(pt) {
   }
   return null;
 }
-const AID = () => { const st = (typeof S !== 'undefined' && S.settings) || {}; return { step: st.planStep || 5, rulers: st.planRulers !== false, loupe: st.planLoupe !== false, pro: !!st.planPro, scale: st.planScale || 0 }; };
+const AID = () => { const st = (typeof S !== 'undefined' && S.settings) || {}; return { step: [2, 5].includes(st.planStep) ? st.planStep : (st.planScale === 20 ? 2 : 5), rulers: st.planRulers !== false, loupe: st.planLoupe !== false, pro: !!st.planPro, scale: st.planScale || 0 }; };
 function snap(pt, from, skip) {
   const tol = 16 / P.view.s, STEP = AID().step;
   for (const w of P.plan.walls) if (w !== skip) for (const e of [[w.x1, w.y1], [w.x2, w.y2]]) if (Math.hypot(pt.x - e[0], pt.y - e[1]) < tol) return { x: e[0], y: e[1], snapped: true };
@@ -318,12 +323,14 @@ function draw() {
   const act = P.lpt ? toWorld(P.lpt.cx, P.lpt.cy) : (P.cursor && P.gesture?.type === 'draw' ? P.cursor : null);
   const actPt = P.gesture?.type === 'wend' ? { x: P.gesture.w['x' + P.gesture.end], y: P.gesture.w['y' + P.gesture.end] } : P.gesture?.type === 'draw' && P.cursor ? P.cursor : act;
   if (AID().rulers) { // סרגלים בקצה העליון והימני, עם שנתות לפי הזום
-    const W = r.width, H = r.height, RS = 20; let tick = [1, 5, 10, 50, 100, 500, 1000, 5000].find(t => t * s >= 46) || 5000;
+    const W = r.width, H = r.height, RS = 20; let tick = [1, 5, 10, 50, 100, 500, 1000, 5000].find(t => t * s >= 46) || 5000, nSub = 5;
+    if (AID().scale) { const tk = scaleTick(); // סרגל של קנה מידה: כל פס = tk ס"מ (1:20 → 2, 1:50 → 5), מספר כל 10 פסים
+      let m = 1; while (tk * m * s < 3.5 && m < 1000) m *= 2; if (tk * 10 * m * s >= 30) { tick = tk * 10 * m; nSub = 10; } }
     const lab = v => Math.abs(v) >= 100 ? (v / 100).toFixed(tick >= 100 ? 0 : 1).replace(/\.0$/, '') + 'מ' : Math.round(v) + '';
     over += `<rect x="0" y="0" width="${W}" height="${RS}" fill="rgba(255,255,255,.9)"/><rect x="${W - RS}" y="0" width="${RS}" height="${H}" fill="rgba(255,255,255,.9)"/>`;
-    for (let v = Math.floor(x0 / tick) * tick; v <= x1; v += tick) { const X = P.view.tx + v * s; for (let k = 1; k < 5; k++) { const Xs = X + k * tick * s / 5; over += `<line x1="${Xs}" y1="${RS - 4}" x2="${Xs}" y2="${RS}" stroke="#b9ad9f" stroke-width="1"/>`; }
+    for (let v = Math.floor(x0 / tick) * tick; v <= x1; v += tick) { const X = P.view.tx + v * s; for (let k = 1; k < nSub; k++) { const Xs = X + k * tick * s / nSub; over += `<line x1="${Xs}" y1="${RS - (k * 2 === nSub ? 7 : 4)}" x2="${Xs}" y2="${RS}" stroke="#b9ad9f" stroke-width="1"/>`; }
       over += `<line x1="${X}" y1="${RS - 10}" x2="${X}" y2="${RS}" stroke="#6b5f54" stroke-width="1"/><text x="${X + 2}" y="10" font-size="9" fill="#6b5f54">${lab(v)}</text>`; }
-    for (let v = Math.floor(y0 / tick) * tick; v <= y1; v += tick) { const Y = P.view.ty + v * s; for (let k = 1; k < 5; k++) { const Ys = Y + k * tick * s / 5; over += `<line x1="${W - RS}" y1="${Ys}" x2="${W - RS + 4}" y2="${Ys}" stroke="#b9ad9f" stroke-width="1"/>`; }
+    for (let v = Math.floor(y0 / tick) * tick; v <= y1; v += tick) { const Y = P.view.ty + v * s; for (let k = 1; k < nSub; k++) { const Ys = Y + k * tick * s / nSub; over += `<line x1="${W - RS}" y1="${Ys}" x2="${W - RS + (k * 2 === nSub ? 7 : 4)}" y2="${Ys}" stroke="#b9ad9f" stroke-width="1"/>`; }
       over += `<line x1="${W - RS}" y1="${Y}" x2="${W - RS + 10}" y2="${Y}" stroke="#6b5f54" stroke-width="1"/><text x="${W - 2}" y="${Y - 2}" font-size="9" fill="#6b5f54" text-anchor="end">${lab(v)}</text>`; }
     if (actPt) { const X = P.view.tx + actPt.x * s, Y = P.view.ty + actPt.y * s;
       over += `<line x1="${X}" y1="${RS}" x2="${X}" y2="${H}" stroke="#2e7dd7" stroke-width="1" stroke-dasharray="4 3" opacity=".7"/><line x1="0" y1="${Y}" x2="${W - RS}" y2="${Y}" stroke="#2e7dd7" stroke-width="1" stroke-dasharray="4 3" opacity=".7"/>
@@ -382,7 +389,7 @@ function open(app, p) {
         <span class="chip" data-t="magic">🪄 יישור קסם</span>
         <span class="chip ${AID().rulers ? 'on' : ''}" id="aRul">📏 סרגלים</span><span class="chip ${AID().loupe ? 'on' : ''}" id="aLoupe">🔍 מגדלת</span><span class="chip ${AID().pro ? 'on' : ''}" id="aPro">📐 סגנון מקצועי</span>
         <select id="aScale" style="padding:5px 8px;width:auto"><option value="0">קנה מידה: חופשי</option>${[20, 50, 100].map(v => `<option value="${v}" ${AID().scale === v ? 'selected' : ''}>1:${v}</option>`).join('')}</select>
-        <select id="aStep" style="padding:5px 8px;width:auto">${[1, 5, 10].map(v => `<option value="${v}" ${AID().step === v ? 'selected' : ''}>דיוק ${v} ס"מ</option>`).join('')}</select></div>
+        <select id="aStep" style="padding:5px 8px;width:auto">${[2, 5].map(v => `<option value="${v}" ${AID().step === v ? 'selected' : ''}>דיוק ${v} ס"מ${AID().scale && scaleTick() === v ? ' (פס אחד)' : ''}</option>`).join('')}</select></div>
       <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sec sm" id="hUndo" style="flex:1">↶ ביטול</button><button class="btn sec sm" id="hRedo" style="flex:1">↷ חזרה</button><button class="btn sec sm" id="hClear" style="flex:1">🧹 ניקוי</button></div>
       <div class="row" style="margin-top:8px"><span class="muted">סוג קיר חדש:</span>
         <select id="wtSel" class="grow" style="padding:7px 10px;flex:1">${Object.entries(WALL_TYPES).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('')}</select></div>
@@ -514,7 +521,7 @@ function bindTools() {
   $('#aRul').onclick = () => { S.settings.planRulers = !AID().rulers; save(); $('#aRul').classList.toggle('on', AID().rulers); draw(); };
   $('#aLoupe').onclick = () => { S.settings.planLoupe = !AID().loupe; save(); $('#aLoupe').classList.toggle('on', AID().loupe); toast(AID().loupe ? 'מגדלת פעילה — מופיעה בזמן שרטוט וגרירה' : 'מגדלת כבויה'); };
   $('#aPro').onclick = () => { S.settings.planPro = !AID().pro; save(); $('#aPro').classList.toggle('on', AID().pro); draw(); };
-  $('#aScale').onchange = e => { const v = +e.target.value; S.settings.planScale = v; save(); if (v) setScale(v); else toast('זום חופשי'); };
+  $('#aScale').onchange = e => { const v = +e.target.value; S.settings.planScale = v; if (v) S.settings.planStep = v === 20 ? 2 : 5; save(); if (v) { setScale(v); toast(`קנה מידה 1:${v} — כל פס בסרגל = ${scaleTick(v)} ס"מ, וההצמדה בשרטוט לכל ${v === 20 ? 2 : 5} ס"מ`); const st = $('#aStep'); if (st) st.value = String(S.settings.planStep); } else toast('זום חופשי'); draw(); };
   $('#aStep').onchange = e => { S.settings.planStep = +e.target.value; save(); toast(`הצמדה לכל ${e.target.value} ס"מ`); };
   document.querySelectorAll('#tools .chip').forEach(c => c.onclick = () => { if (c.dataset.t === 'furn') { furnPicker(); return; } setTool(c.dataset.t); });
   $('#wtSel').onchange = (e) => { P.wallType = e.target.value; setTool('wall'); };
@@ -845,7 +852,7 @@ function renderFBar() {
   if (wsel && changeRule(wsel)?.level !== 'red') {
     bar.style.display = 'flex';
     bar.innerHTML = `<button class="btn sec sm" data-n="0,-1">▲</button><button class="btn sec sm" data-n="0,1">▼</button><button class="btn sec sm" data-n="1,0">▶</button><button class="btn sec sm" data-n="-1,0">◀</button><button class="btn sec sm" id="wcopy">⧉ העתקה</button><button class="btn sm" id="fok">✓</button>
-      <div style="width:100%;display:flex;gap:4px;justify-content:center;align-items:center;flex-wrap:wrap"><span style="font-size:12px">עובי:</span>${[7, 10, 15, 20, 25, 30, 40].map(t => `<button class="chip${wsel.thick === t ? ' on' : ''}" data-th="${t}" style="padding:3px 8px;font-size:12px">${t}</button>`).join('')}<input id="thC" type="number" inputmode="numeric" placeholder="אחר" style="width:62px;padding:4px 6px;font-size:12px"></div>
+      <div style="width:100%;display:flex;gap:4px;justify-content:center;align-items:center;flex-wrap:wrap"><span style="font-size:12px">עובי:</span>${thickStd().map(t => `<button class="chip${wsel.thick === t ? ' on' : ''}" data-th="${t}" title="1:${AID().scale || 50}: ${+(t / scaleTick()).toFixed(1)} פסים בסרגל" style="padding:3px 8px;font-size:12px;line-height:1.1">${t}<br><small style="opacity:.6;font-size:9px">${t % scaleTick() ? +(t / scaleTick()).toFixed(1) + ' פס' : '|'.repeat(t / scaleTick())}</small></button>`).join('')}<input id="thC" type="number" inputmode="numeric" placeholder="אחר" style="width:62px;padding:4px 6px;font-size:12px"></div>
       <div class="muted" style="width:100%;text-align:center;font-size:11px">גוררים את הקיר (✥) להזזה · גוררים עיגול בקצה לשינוי אורך וכיוון · חצים = ס"מ אחד</div>`;
     const links = [...linkedEnds(wsel, 1), ...linkedEnds(wsel, 2)];
     bar.querySelectorAll('[data-n]').forEach(b => {
@@ -1020,8 +1027,8 @@ function cvWalls(im) {
   const sc = Math.min(1, 1600 / Math.max(im.width, im.height)), W = Math.round(im.width * sc), H = Math.round(im.height * sc);
   const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', { willReadFrequently: true });
   x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.drawImage(im, 0, 0, W, H);
-  const d = x.getImageData(0, 0, W, H).data, dark = new Uint8Array(W * H);
-  for (let i = 0; i < W * H; i++) { const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2]; dark[i] = (r * .3 + g * .59 + b * .11) < 175 ? 1 : 0; }
+  const d = x.getImageData(0, 0, W, H).data, dark = new Uint8Array(W * H), lum = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) { const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2]; lum[i] = r * .3 + g * .59 + b * .11; dark[i] = lum[i] < 175 ? 1 : 0; }
   // פתיחה מורפולוגית: מוחקים כל מה שדק מ-k פיקסלים (קווי מידה, טקסט, חצים)
   const integ = (m) => { const I = new Int32Array((W + 1) * (H + 1)); for (let y = 0; y < H; y++) { let row = 0; for (let xx = 0; xx < W; xx++) { row += m[y * W + xx]; I[(y + 1) * (W + 1) + xx + 1] = I[y * (W + 1) + xx + 1] + row; } } return I; };
   const box = (I, x0, y0, x1, y1) => I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0];
@@ -1065,12 +1072,23 @@ function cvWalls(im) {
     for (const w of walls) { const pad = 2; if (w.o === 'h') { for (let y = Math.max(0, Math.round(w.c - w.t / 2 - pad)); y < Math.min(H, w.c + w.t / 2 + pad); y++) for (let xx = Math.max(0, w.a - pad); xx < Math.min(W, w.b + pad); xx++) cov[y * W + xx] = 1; }
       else { for (let xx = Math.max(0, Math.round(w.c - w.t / 2 - pad)); xx < Math.min(W, w.c + w.t / 2 + pad); xx++) for (let y = Math.max(0, w.a - pad); y < Math.min(H, w.b + pad); y++) cov[y * W + xx] = 1; } }
     const left = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) left[i] = m[i] && !cov[i] ? 1 : 0;
-    for (const bb of comps(left)) { const w = bb.x1 - bb.x0 + 1, h = bb.y1 - bb.y0 + 1; if (bb.n < k * k * 3 || Math.min(w, h) < k) continue;
-      if (w >= h) walls.push({ o: 'h', a: bb.x0, b: bb.x1 + 1, c: (bb.y0 + bb.y1 + 1) / 2, t: h }); else walls.push({ o: 'v', a: bb.y0, b: bb.y1 + 1, c: (bb.x0 + bb.x1 + 1) / 2, t: w }); } }
+    for (const bb of comps(left)) { const w = bb.x1 - bb.x0 + 1, h = bb.y1 - bb.y0 + 1; if (bb.n < k * k * 1.5 || Math.min(w, h) < k) continue;
+      // צד שנוגע בקיר קיים — מחזירים את השוליים שנגזרו (pad) כדי שהזיז יימדד במלואו (בליטה של 13 לא תצא 8)
+      const touch = (side) => { for (let q = (side === 'l' || side === 'r' ? bb.y0 : bb.x0); q <= (side === 'l' || side === 'r' ? bb.y1 : bb.x1); q++) { const px = side === 'l' ? bb.x0 - 1 : side === 'r' ? bb.x1 + 1 : q, py = side === 't' ? bb.y0 - 1 : side === 'b' ? bb.y1 + 1 : q; if (px >= 0 && py >= 0 && px < W && py < H && cov[py * W + px] && m[py * W + px]) return 1; } return 0; };
+      const x0 = bb.x0 - 2 * touch('l'), x1 = bb.x1 + 2 * touch('r'), y0 = bb.y0 - 2 * touch('t'), y1 = bb.y1 + 2 * touch('b'), ww = x1 - x0 + 1, hh = y1 - y0 + 1;
+      if (ww >= hh) walls.push({ o: 'h', a: x0, b: x1 + 1, c: (y0 + y1 + 1) / 2, t: hh, lo: 1 }); else walls.push({ o: 'v', a: y0, b: y1 + 1, c: (x0 + x1 + 1) / 2, t: ww, lo: 1 }); } }
+  // עובי מדויק (תת־פיקסל): סוכמים את "כמות הכהות" לרוחב הקיר — שולי הקיר המטושטשים נספרים חלקית, כך 15 לא נמדד כ-12
+  for (const w of walls) { const L = w.b - w.a; if (L < 4 || w.lo) continue; const vals = [], cs = [];
+    for (let i = Math.round(w.a + L * .2); i < w.a + L * .8; i++) { const ci = Math.round(w.c), px = w.o === 'h' ? i : ci, py = w.o === 'h' ? ci : i; if (px < 0 || py < 0 || px >= W || py >= H) continue; cs.push(lum[py * W + px]); }
+    cs.sort((p, q) => p - q); const Lw = cs[Math.floor(cs.length / 2)]; if (!(Lw < 190)) continue; const bg = 250;
+    for (let i = Math.round(w.a + L * .2); i < w.a + L * .8; i++) { let sum = 0; const h0 = Math.floor(w.c - w.t / 2 - 3), h1 = Math.ceil(w.c + w.t / 2 + 3);
+      for (let j = h0; j <= h1; j++) { const px = w.o === 'h' ? i : j, py = w.o === 'h' ? j : i; if (px < 0 || py < 0 || px >= W || py >= H) continue; sum += Math.max(0, Math.min(1, (bg - lum[py * W + px]) / (bg - Lw))); }
+      vals.push(sum); }
+    if (vals.length >= 3) { vals.sort((p, q) => p - q); const t2 = vals[Math.floor(vals.length / 2)]; if (t2 > w.t * 0.7 && t2 < w.t * 1.5) w.t = t2; } }
   // חיבור פינות: קצה של קיר אופקי שנוגע בקיר אנכי → נצמד לקו האמצע שלו (וההפך)
   for (const w of walls) for (const e of ['a', 'b']) {
     let best = null;
-    for (const o of walls) { if (o.o === w.o) continue; const within = w.c >= o.a - w.t && w.c <= o.b + w.t; if (!within) continue;
+    for (const o of walls) { if (o.o === w.o || (o.lo && !w.lo)) continue; const within = w.c >= o.a - w.t && w.c <= o.b + w.t; if (!within) continue;
       const dEnd = Math.abs(w[e] - o.c); if (dEnd <= o.t / 2 + w.t * 0.6 + 2 && (!best || dEnd < best.d)) best = { d: dEnd, v: o.c }; }
     if (best) w[e] = best.v; else w[e] = e === 'a' ? w.a + w.t / 2 * 0 : w.b; // קצה חופשי נשאר בקצה הקיר
   }
@@ -1097,8 +1115,8 @@ function cvImportUI(out, cv, im, dataURL, known, closeAll, tryAI) {
   $('#cvAI', out).onclick = tryAI;
   $('#cvGo', out).onclick = async () => {
     const L = +$('#cvLen', out).value; if (!(L > 0)) return toast('מקלידים את האורך של הקיר האדום');
-    const cmPx = L / lenPx, r5 = v => Math.round(v), STD = [7, 10, 12, 15, 20, 25, 30, 35, 40, 50], T = (t) => { const cm = t * cmPx, n = STD.reduce((p, q) => Math.abs(q - cm) < Math.abs(p - cm) ? q : p); return Math.abs(n - cm) <= Math.max(3, cm * 0.22) ? n : Math.round(cm); };
-    const walls = ws.map(w => { const t = T(w.t), type = t >= 25 ? 'exterior' : 'interior';
+    const cmPx = L / lenPx, r5 = v => Math.round(v), T = (t, len) => { const cm = t * cmPx; return len * cmPx < Math.max(45, cm * 1.5) ? Math.max(5, Math.round(cm)) : snapThick(cm); }; // קיר = עובי תקני; זיז/בליטה קצרה = המידה שנמדדה
+    const walls = ws.map(w => { const t = T(w.t, w.b - w.a), type = t >= 25 ? 'exterior' : 'interior';
       return w.o === 'h' ? { id: 'w' + uid(), x1: r5(w.a * cmPx), y1: r5(w.c * cmPx), x2: r5(w.b * cmPx), y2: r5(w.c * cmPx), thick: t, type } : { id: 'w' + uid(), x1: r5(w.c * cmPx), y1: r5(w.a * cmPx), x2: r5(w.c * cmPx), y2: r5(w.b * cmPx), thick: t, type }; });
     if (P.plan.walls.length && !confirm(`להחליף את מה שכבר משורטט ב-${walls.length} הקירות שזוהו? (אפשר לבטל ב-↶)`)) return;
     P.plan.walls = walls; P.plan.openings = [];
@@ -1133,12 +1151,12 @@ function aiPlanFromImage() {
         const prompt = `You are an expert architectural drafter. Read this floor plan image (it may be a printed plan, CAD export, or a hand pencil sketch) and extract its geometry.
 Coordinates: use normalized image coordinates 0-1000 for x (left→right) and 0-1000 for y (top→bottom), measured on the wall CENTER LINES.
 Return ONLY JSON:
-{"walls":[{"x1":n,"y1":n,"x2":n,"y2":n,"kind":"exterior|interior|mamad","thick_cm":n}],
+{"walls":[{"x1":n,"y1":n,"x2":n,"y2":n,"kind":"exterior|interior|mamad","thick_cm":10|15|20|25|30}],
  "openings":[{"wall":index,"kind":"door|window","t":0..1 position of the opening center along the wall from (x1,y1),"width_cm":n}],
  "scale":{"x1":n,"y1":n,"x2":n,"y2":n,"cm":n} — ONE clearly written dimension in the drawing (its two end points in the same normalized coords and its real length in cm; convert meters to cm) or null,
  "rooms":[{"name":"Hebrew room name if written","x":n,"y":n}],
  "notes":"short Hebrew note about what was unclear"}
-Rules: include every wall segment (split walls at corners and T-junctions); straight walls should be exactly horizontal/vertical when they look so; exterior walls ~25cm, interior ~10cm, a safe room (ממ"ד) ~30cm; do not invent walls; ignore furniture, text and dimension lines as walls.${known ? '\nThe user says this known dimension: ' + known : ''}`;
+Rules: include every wall segment (split walls at corners and T-junctions); straight walls should be exactly horizontal/vertical when they look so; wall thickness is ALWAYS one of 10, 15, 20, 25, 30 cm (on a 1:50 plan each ruler tick is 5cm: 10=2 ticks, 15=3, 20=4, 25=5, 30=6) — exterior usually 25, interior 10, a safe room (ממ"ד) 30; do not invent walls; ignore furniture, text and dimension lines as walls.${known ? '\nThe user says this known dimension: ' + known : ''}`;
         const st = (m) => { const e = $('#apSt', b); if (e) e.textContent = m; };
         st('ה-AI קורא את התוכנית…');
         const h = dataURL.split(',');
@@ -1157,7 +1175,7 @@ Rules: include every wall segment (split walls at corners and T-junctions); stra
         }
         const T = { exterior: ['exterior', 25], interior: ['interior', 10], mamad: ['mamad', 30] };
         let walls = walls0.map(w => { const a = px(w.x1, w.y1), c = px(w.x2, w.y2), [type, th] = T[w.kind] || T.interior;
-          return { id: 'w' + uid(), x1: a.x * cmPerPx, y1: a.y * cmPerPx, x2: c.x * cmPerPx, y2: c.y * cmPerPx, thick: Math.max(8, Math.min(40, Math.round(w.thick_cm || th))), type }; });
+          return { id: 'w' + uid(), x1: a.x * cmPerPx, y1: a.y * cmPerPx, x2: c.x * cmPerPx, y2: c.y * cmPerPx, thick: snapThick(w.thick_cm || th), type }; });
         // יישור: כמעט אופקי/אנכי → ישר; חיבור קצוות קרובים
         for (const w of walls) { const dx = w.x2 - w.x1, dy = w.y2 - w.y1; if (Math.abs(dy) < Math.abs(dx) * 0.09) { const y = (w.y1 + w.y2) / 2; w.y1 = w.y2 = y; } else if (Math.abs(dx) < Math.abs(dy) * 0.09) { const x = (w.x1 + w.x2) / 2; w.x1 = w.x2 = x; } }
         const pts = walls.flatMap(w => [[w, 1], [w, 2]]);
