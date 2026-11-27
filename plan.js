@@ -338,7 +338,24 @@ function open(app, p) {
   P.wallType = P.wallType || 'interior';
   setHeader('📐 ' + p.name, true);
   app.innerHTML = `
-    <div class="card" style="padding:10px">
+    <style>
+      body.planfs #stage{position:fixed!important;inset:0;height:auto!important;z-index:120;border-radius:0!important;border:0!important}
+      body.planfs #ptools{position:fixed;top:calc(104px + env(safe-area-inset-top));left:8px;right:8px;z-index:130;max-height:70vh;overflow:auto;box-shadow:0 6px 24px #0005;display:none}
+      body.planfs.toolsOpen #ptools{display:block}
+      body.planfs #props{position:fixed;bottom:0;left:0;right:0;z-index:130;max-height:50vh;overflow:auto;margin:0!important;display:none}
+      body.planfs.propsOpen #props{display:block}
+      body.planfs #props .card{margin:0;border-radius:16px 16px 0 0;box-shadow:0 -6px 24px #0004}
+      #fsbar{display:none}
+      body.planfs #fsbar{display:flex;position:fixed;top:calc(8px + env(safe-area-inset-top));left:8px;right:8px;z-index:131;gap:5px;flex-wrap:wrap;justify-content:center;background:rgba(255,255,255,.94);border-radius:14px;padding:5px;box-shadow:0 2px 10px #0003}
+      #fsbar .chip{margin:0}
+      body.planfs #stage .zoomcol{top:calc(100px + env(safe-area-inset-top))!important}
+      .roundbtn{width:44px;height:44px;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 2px 8px #0003}
+    </style>
+    <div id="fsbar">
+      <span class="chip" data-ft="select">👆 בחירה</span><span class="chip" data-ft="pan">✋ גלילה</span><span class="chip" data-ft="wall">🧱 קיר</span>
+      <button class="btn sec sm" id="fsUndo">↶</button><button class="btn sec sm" id="fsRedo">↷</button>
+      <button class="btn sec sm" id="fsMore">⋯ כל הכלים</button><button class="btn sm" id="fsExit">⛶ יציאה</button></div>
+    <div class="card" style="padding:10px" id="ptools">
       <div class="chips" id="tools">
         <span class="chip" data-t="select">👆 בחירה</span><span class="chip" data-t="pan">✋ גלילת מסך</span>
         <span class="chip" data-t="wall">🧱 קיר</span><span class="chip" data-t="door">🚪 דלת</span><span class="chip" data-t="window">🪟 חלון</span><span class="chip" data-t="furn">🛋️ ריהוט</span>
@@ -354,14 +371,14 @@ function open(app, p) {
     </div>
     <div style="position:relative;background:#fbf8f4;border:1px solid var(--line);border-radius:14px;overflow:hidden;height:58vh;touch-action:none" id="stage">
       <svg id="psvg" width="100%" height="100%" style="display:block;touch-action:none;user-select:none"></svg>
-      <div style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:6px">
-        <button class="btn sec sm" id="zin">＋</button><button class="btn sec sm" id="zout">－</button><button class="btn sec sm" id="zfit">⤢</button></div>
+      <div class="zoomcol" style="position:absolute;top:${AID().rulers ? 26 : 8}px;left:8px;display:flex;flex-direction:column;gap:6px;z-index:2">
+        <button class="btn sec sm" id="zin">＋</button><button class="btn sec sm" id="zout">－</button><button class="btn sec sm" id="zfit">⤢</button><button class="btn sec sm" id="zfs" title="מסך מלא">⛶</button></div>
       ${!P.plan.walls.length && !P.plan.bg && !P.hintClosed ? `<div id="emptyHint" style="position:absolute;bottom:10px;right:10px;left:62px;text-align:center;background:rgba(255,255,255,.95);border:1px dashed var(--accent);border-radius:14px;padding:12px 12px 10px;color:var(--ink);font-size:13px;line-height:1.45;z-index:2">
         <button id="ehX" class="btn sm" style="position:absolute;top:6px;left:6px;padding:4px 10px">✕ הבנתי</button>
         <b>התוכנית ריקה</b><br>כל המידות בס"מ (365 = 3.65 מטר) · הסרגל למעלה מראה מטרים<br><br>✏️ לשרטט: בוחרים <b>🧱 קיר</b>, נוגעים בנקודה אחת ואז בנקודה הבאה — הקירות נמשכים זה מזה. "✓ סיום קו" כשמסיימים.<br><br>📷 או: <b>🤖 זיהוי תוכנית מתמונה</b> (למטה) — והבית נבנה לבד.<br><br>⤢ מציג את כל התוכנית.</div>` : ''}
       <div id="fbar" style="position:absolute;bottom:8px;left:8px;right:8px;display:none;gap:5px;flex-wrap:wrap;justify-content:center;background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:12px;padding:6px"></div>
       <div id="chainBar" style="position:absolute;bottom:8px;right:8px;display:none"><button class="btn sm" id="endChain">✓ סיום קו</button></div>
-      ${P.plan.walls.length ? `<button class="btn sm" id="planDone" style="position:absolute;top:${AID().rulers ? 26 : 8}px;left:50%;transform:translateX(-50%);z-index:2;box-shadow:0 2px 8px #0003">✓ סיימתי — מה הלאה?</button>` : ''}
+      ${P.plan.walls.length ? `<button class="btn roundbtn" id="planDone" title="סיימתי — מה הלאה?" style="position:absolute;bottom:${'8px'};left:8px;z-index:2">✓</button>` : ''}
       ${P.plan.original ? `<div style="position:absolute;top:${AID().rulers ? 26 : 8}px;right:26px"><button class="btn ${P.showOriginal ? '' : 'sec'} sm" id="baBtn">${P.showOriginal ? '👁 מצב קיים (לפני)' : '✏️ אחרי (תכנון)'}</button></div>` : ''}
     </div>
     <div id="props" style="margin-top:10px"></div>
@@ -393,6 +410,15 @@ function open(app, p) {
   $('#bBg').onclick = pickBackground;
   $('#bAiPlan').onclick = aiPlanFromImage;
   if ($('#planDone')) $('#planDone').onclick = planDoneMenu;
+  // ⛶ מסך מלא: השרטוט על כל המסך, סרגל קטן עם הכלים החשובים, "⋯" פותח את כל הכלים
+  const fsSync = () => { document.querySelectorAll('#fsbar [data-ft]').forEach(c => c.classList.toggle('on', c.dataset.ft === P.tool)); };
+  const fsSet = (on) => { P.fs = on; document.body.classList.toggle('planfs', on); document.body.classList.remove('toolsOpen', 'propsOpen'); setTimeout(() => { fit(); draw(); }, 60); fsSync(); };
+  $('#zfs').onclick = () => fsSet(!P.fs);
+  $('#fsExit').onclick = () => fsSet(false);
+  $('#fsMore').onclick = () => document.body.classList.toggle('toolsOpen');
+  $('#fsUndo').onclick = () => histGo(-1); $('#fsRedo').onclick = () => histGo(1);
+  document.querySelectorAll('#fsbar [data-ft]').forEach(c => c.onclick = () => { setTool(c.dataset.ft); fsSync(); });
+  if (P.fs) { document.body.classList.add('planfs'); fsSync(); }
   $('#bOrig').onclick = () => {
     if (!P.plan.walls.length) return toast('קודם משרטטים את הבית');
     if (P.plan.original && !confirm('לעדכן את "מצב קיים" לתוכנית הנוכחית? המצב הקודם יוחלף.')) return;
@@ -446,7 +472,7 @@ function clearMenu() {
 
 function setTool(t) {
   if (P.showOriginal && ['wall', 'door', 'window', 'furn'].includes(t)) { toast('במצב "לפני" אי אפשר לערוך. עוברים ל"אחרי".'); t = 'select'; }
-  P.tool = t; P.chain = null; P.cursor = null;
+  P.tool = t; P.chain = null; P.cursor = null; document.body.classList.remove('toolsOpen'); document.querySelectorAll('#fsbar [data-ft]').forEach(c => c.classList.toggle('on', c.dataset.ft === t));
   if (t === 'furn' && !P.furnType) setTimeout(furnPicker, 50);
   document.querySelectorAll('#tools .chip, [data-t="magic"]').forEach(c => c.classList.toggle('on', c.dataset.t === t));
   $('#wtSel').value = P.wallType;
@@ -602,6 +628,24 @@ function straighten(walls) {
     else if (Math.abs(t) % 180 === 90) { const x = Math.round((w.x1 + w.x2) / 2 / STEP) * STEP; moveEnd(w, 1, x, w.y1); moveEnd(w, 2, x, w.y2); }
     else { const rad = t * Math.PI / 180; moveEnd(w, 2, Math.round(w.x1 + Math.cos(rad) * L), Math.round(w.y1 + Math.sin(rad) * L)); }
   }
+  // 3. חיתוך "זנבות" שבולטים מעבר לקיר אחר, והשלמת קירות שלא מגיעים עד הקיר (עד 60 ס"מ)
+  const segHit = (ax, ay, bx, by, o) => { // נקודת חיתוך בין הקו a→b לקטע o; מחזיר t לאורך a→b
+    const rx = bx - ax, ry = by - ay, sx = o.x2 - o.x1, sy = o.y2 - o.y1, den = rx * sy - ry * sx; if (Math.abs(den) < 1e-9) return null;
+    const t = ((o.x1 - ax) * sy - (o.y1 - ay) * sx) / den, u = ((o.x1 - ax) * ry - (o.y1 - ay) * rx) / den;
+    return u >= -0.001 && u <= 1.001 ? t : null;
+  };
+  let trimmed = 0;
+  for (let pass = 0; pass < 2; pass++) for (const w of walls) for (const e of [1, 2]) {
+    if (linkedEnds(w, e).length) continue; // קצה מחובר — לא נוגעים
+    const o_ = e === 1 ? 2 : 1, ax = w['x' + o_], ay = w['y' + o_], bx = w['x' + e], by = w['y' + e], L = Math.hypot(bx - ax, by - ay); if (L < 1) continue;
+    let best = null;
+    for (const o of P.plan.walls) { if (o === w) continue; const t = segHit(ax, ay, bx, by, o); if (t == null) continue;
+      const over = (1 - t) * L; // כמה הקצה בולט מעבר לקיר (חיובי) או חסר עד הקיר (שלילי)
+      if (t > 0.05 && over > 2 && over < Math.max(150, L * 0.3) && (!best || over < best.over)) best = { t, over };
+      if (over < -2 && over > -60 && (!best || Math.abs(over) < Math.abs(best.over))) best = best && best.over > 0 ? best : { t, over }; }
+    if (best) { w['x' + e] = Math.round(ax + (bx - ax) * best.t); w['y' + e] = Math.round(ay + (by - ay) * best.t); trimmed++; }
+  }
+  P.plan.walls = P.plan.walls.filter(w => len(w) >= 10);
   for (const w of walls) clampOpenings(w);
   return walls.length;
 }
@@ -772,6 +816,9 @@ function renderFBar() {
 }
 function renderProps() {
   renderFBar();
+  { const bar = $('#fbar'); document.body.classList.remove('propsOpen');
+    if (P.fs && P.sel && bar && bar.style.display !== 'none' && !$('#fsProps', bar)) { const b = document.createElement('button'); b.className = 'btn sec sm'; b.id = 'fsProps'; b.textContent = '📝 פרטים'; b.onclick = () => document.body.classList.toggle('propsOpen'); bar.insertBefore(b, bar.querySelector('#fok') || null); }
+    else if (P.fs && P.sel && bar && bar.style.display === 'none') { bar.style.display = 'flex'; bar.innerHTML = '<button class="btn sec sm" id="fsProps">📝 פרטים</button><button class="btn sm" id="fok">✓</button>'; $('#fsProps', bar).onclick = () => document.body.classList.toggle('propsOpen'); $('#fok', bar).onclick = () => { P.sel = null; draw(); renderProps(); }; } }
   const box = $('#props'); if (!box) return;
   const pl = cur(), ro = P.showOriginal;
   if (!P.sel) { box.innerHTML = ''; return; }

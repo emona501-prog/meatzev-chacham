@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.0.3';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -153,6 +153,7 @@ function setHeader(title, back) {
 
 async function render() {
   const app = $('#app');
+  if (!V.planOpen) document.body.classList.remove('planfs', 'toolsOpen', 'propsOpen');
   if (V.tab === 'projects') {
     if (V.planOpen && proj()) return Plan.open(app, proj());
     if (V.roomId && room()) return renderRoom(app);
