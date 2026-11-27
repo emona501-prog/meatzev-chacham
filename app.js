@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.1.4';
+const APP_VERSION = '1.1.5';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -1753,6 +1753,7 @@ async function renderCatalog(app) {
     <div class="grid2" style="margin-bottom:12px">
       <button class="btn" id="bulk">📥 הוספת הרבה תמונות</button>
       <button class="btn sec" id="newI">+ מוצר עם פרטים</button></div>
+      <button class="btn sec full" id="newL" style="margin-top:6px">🔗 מוצר מאתר (קישור + תמונה)</button>
     ${cat ? '' : '<div class="muted" style="margin-bottom:10px">טיפ: בוחרים קודם קטגוריה, ואז כל התמונות שמוסיפים נכנסות אליה.</div>'}
     <div class="swatches" id="clist"></div>
     ${list.length ? '' : '<div class="empty"><b>🧱</b>אין מוצרים בקטגוריה הזו עדיין.</div>'}`;
@@ -1761,6 +1762,7 @@ async function renderCatalog(app) {
   app.querySelectorAll('[data-s]').forEach(c => c.onclick = () => stay({ subFilter: c.dataset.s }));
   if ($('#addSub')) $('#addSub').onclick = () => catForm(cat, true);
   $('#newI').onclick = () => itemForm(null, cat === '__review' ? '' : cat, sub);
+  if ($('#newL')) $('#newL').onclick = linkItemDialog;
   $('#bulk').onclick = () => bulkAdd(cat === '__review' ? '' : cat, sub);
   $('#sortIn').onclick = () => sortInbox();
   $('#selMode').onclick = () => { CSEL.clear(); stay({ selMode: !V.selMode }); };
@@ -1985,7 +1987,46 @@ function attachSpin(img, srcs, onChange) {
 }
 async function loadImgs(ids) { const out = []; for (const id of ids) { const d = await getImg(id) || await Sync.fetchImg(id); if (d) out.push(d); } return out; }
 
-function itemForm(it, defCat, defSub) {
+// 🔗 מוצר מקישור: ה-AI קורא את עמוד המוצר (url_context) ומחזיר שם, מחיר, מידות, צבע וכתובת התמונה
+async function aiFromLink(url, onStatus) {
+  const cats = R().catCats;
+  const q = `Read this online shop product page: ${url}
+Return ONLY JSON (no markdown) describing THIS specific product (Hebrew values except url/model):
+{"name": short descriptive Hebrew product name, "category": EXACTLY one of ${JSON.stringify(cats)}, "subcategory": if that category has subcategories here, EXACTLY one of them, else "": ${JSON.stringify(Object.fromEntries(cats.filter(c => subsOf(c).length).map(c => [c, subsOf(c)])))}, "brand": shop or brand name, "model": SKU/model exactly as on the page or "", "dims": size as written (cm), "color": color/finish in Hebrew, "material": material in Hebrew, "price": price with currency as on the page or "", "note": one short Hebrew sentence describing the look, "image": absolute URL of the main product image (og:image or the main gallery image) or ""}
+Never invent values that are not on the page.`;
+  const txt = await geminiText([{ text: q }], false, onStatus, { tools: [{ url_context: {} }], timeout: 60000 });
+  let j = {}; try { j = JSON.parse((txt.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch {}
+  if (!j.name) throw new Error('לא נמצאו פרטי מוצר בעמוד');
+  return j;
+}
+async function urlToData(u) { // רוב האתרים חוסמים — מנסים, ואם לא הולך מחזירים ריק
+  try { const r = await fetch(u, { mode: 'cors' }); if (!r.ok) return ''; const bl = await r.blob(); if (!/^image\//.test(bl.type)) return ''; return await catalogImageData(new File([bl], 'p', { type: bl.type })); } catch { return ''; }
+}
+const findUrl = (t) => (String(t || '').match(/https?:\/\/[^\s"'<>]+/) || [])[0] || '';
+// מה ששותף לאפליקציה (תמונה ו/או קישור) — מצטרף לטיוטה הפתוחה מ-15 הדקות האחרונות, כך שאפשר לשתף קודם את התמונה ואז את העמוד (או להפך)
+async function shareImport() {
+  let meta = {}, img = '';
+  try { const c = await caches.open('share-inbox'); const m = await c.match('meta'); if (m) meta = await m.json(); const im = await c.match('image'); if (im) { const bl = await im.blob(); img = await catalogImageData(new File([bl], 'shared', { type: bl.type || 'image/jpeg' })); } await caches.delete('share-inbox'); } catch {}
+  const link = meta.url || findUrl(meta.text) || findUrl(meta.title);
+  const nm = (meta.title || '').replace(link, '').trim();
+  if (!link && !img) return toast('לא התקבל קישור או תמונה מהשיתוף');
+  let d = null; try { d = await DB.get('shareDraft'); } catch {}
+  if (!d || Date.now() - (d.t || 0) > 15 * 60000) d = {};
+  d = { t: Date.now(), img: img || d.img || '', link: link || d.link || '', name: d.name || nm };
+  try { await DB.set('shareDraft', d); } catch {}
+  V.tab = 'catalog'; render();
+  toast(img && !d.link ? '📷 התמונה התקבלה — אפשר לשתף גם את עמוד המוצר לאותה טיוטה' : !d.img ? '🔗 הקישור התקבל — לתמונה: לחיצה ארוכה על תמונת המוצר ← שיתוף ← מעצב חכם' : '✓ קישור + תמונה — מוכן להדמיה', 4500);
+  setTimeout(() => itemForm(null, R().catCats.includes('אביזרים ודקורציה') ? 'אביזרים ודקורציה' : '', '', { ...d, auto: !!link && !!(S.settings.apiKey || '').trim() }), 200);
+}
+function linkItemDialog() {
+  modal('🔗 מוצר מאתר', `<div class="muted" style="line-height:1.6"><b>הכי נוח (אנדרואיד):</b> באתר של החנות — לחיצה ארוכה על תמונת המוצר ← "שיתוף" ← <b>מעצב חכם</b>. ואחר כך גם "שיתוף" של העמוד עצמו. שניהם נכנסים לאותו מוצר, עם הקישור המדויק.<br><b>או כאן:</b> מדביקים את הקישור ובוחרים את התמונה (שנשמרה מהאתר).</div>
+    <label>קישור למוצר</label><input id="lkU" inputmode="url" dir="ltr" placeholder="https://...">
+    <button class="btn full" id="lkGo" style="margin-top:10px">המשך ›</button>`, (b, close) => {
+    navigator.clipboard?.readText?.().then(t => { const u = findUrl(t); if (u && !$('#lkU', b).value) $('#lkU', b).value = u; }).catch(() => {});
+    $('#lkGo', b).onclick = () => { const u = findUrl($('#lkU', b).value) || $('#lkU', b).value.trim(); close(); setTimeout(() => itemForm(null, R().catCats.includes('אביזרים ודקורציה') ? 'אביזרים ודקורציה' : '', '', { link: u, auto: !!u && !!(S.settings.apiKey || '').trim() }), 150); };
+  });
+}
+function itemForm(it, defCat, defSub, pre) {
   let newImg = null;
   modal(it ? 'עריכת מוצר' : 'מוצר חדש', `
     <div id="imgBox" style="text-align:center"><img id="ip" style="max-width:100%;max-height:260px;border-radius:12px;display:none;user-select:none;-webkit-user-drag:none">
@@ -2002,17 +2043,20 @@ function itemForm(it, defCat, defSub) {
           <div class="row" style="margin-top:6px;gap:6px"><button class="btn sm" data-m="${i}">✓ זה המוצר</button>${m.url ? `<a class="btn sec sm" href="${esc(m.url)}" target="_blank" rel="noopener">🔗 לבדיקה</a>` : ''}</div></div>`).join('')}` : ''}
       ${!it.web?.matches?.length && it.web?.links?.length ? `<div style="margin-top:6px">קישורים שעשויים לעזור: ${it.web.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title || 'קישור')}</a>`).join(' · ')}</div>` : ''}
       <div class="muted" style="font-size:12px;margin-top:6px">כשמסיימים לבדוק — לוחצים "שמירה" והסימון יורד.</div></div></div>` : ''}
-    <label>שם המוצר</label><input id="in" value="${esc(it?.name || '')}" placeholder="למשל: גרניט פורצלן דמוי בטון 60×120">
+    <label>שם המוצר</label><input id="in" value="${esc(it?.name || pre?.name || '')}" placeholder="למשל: גרניט פורצלן דמוי בטון 60×120">
     <div class="grid2"><div><label>קטגוריה</label><select id="ic">${R().catCats.map(c => `<option ${(it?.cat || defCat) === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
       <div><label>תת-קטגוריה</label><select id="isub"></select></div></div>
     <div class="grid2"><div><label>קוד יצרן / דגם</label><input id="im" value="${esc(it?.model || '')}" dir="ltr" placeholder="CAL-60120"></div>
       <div><label>ספק / מותג</label><input id="is" value="${esc(it?.supplier || '')}"></div></div>
     <div class="grid2"><div><label>מידות</label><input id="id" value="${esc(it?.dims || '')}" placeholder="60×120 ס&quot;מ"></div>
       <div><label>צבע / גימור</label><input id="ico" value="${esc(it?.color || '')}" placeholder="אפור מט"></div></div>
-    <div class="grid2"><div><label>מחיר</label><input id="ipr" value="${esc(it?.price || '')}" placeholder='120 ₪ למ"ר'></div>
-      <div><label>קישור</label><input id="il" value="${esc(it?.link || '')}" inputmode="url"></div></div>
+    <div class="grid2"><div><label>מחיר</label><input id="ipr" value="${esc(it?.price || pre?.price || '')}" placeholder='120 ₪ למ"ר'></div>
+      <div><label>קישור</label><input id="il" value="${esc(it?.link || pre?.link || '')}" inputmode="url" dir="ltr"></div></div>
+    <div class="row" style="gap:6px;margin-top:6px"><button class="btn sec sm" id="lnkAI">🔎 פרטים מהקישור</button><a class="btn sec sm" id="lnkOpen" target="_blank" rel="noopener">↗️ פתיחת הקישור</a></div>
+    <div id="lnkMsg" class="muted" style="font-size:12px;margin-top:4px"></div>
     <label>הערה</label><textarea id="ino">${esc(it?.note || '')}</textarea>
     <div style="height:14px"></div><button class="btn full" id="ok">שמירה</button>
+    ${it ? '' : '<div style="height:8px"></div><button class="btn sec full" id="okTry">💾 שמירה + 📸 לנסות אצלי</button>'}
     ${it ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקת המוצר</button>' : ''}`, async (b, close) => {
     if (it) {
       b.querySelectorAll('[data-vid]').forEach(dt => dt.onclick = () => { const v = S.catalog.find(x => x.id === dt.dataset.vid); if (v && v.id !== it.id) { close(); setTimeout(() => itemForm(v), 120); } });
@@ -2049,6 +2093,26 @@ function itemForm(it, defCat, defSub) {
       refreshViews(); $('#aiId', b).style.display = '';
     };
     let newHash = '';
+    if (pre?.img) { newImg = pre.img; newHash = await imgHash(pre.img); mainSrc = pre.img; refreshViews(); $('#aiId', b).style.display = ''; }
+    const lnkUpd = () => { const v = $('#il', b).value.trim(), ok = /^https?:\/\//.test(v); $('#lnkOpen', b).style.display = ok ? '' : 'none'; $('#lnkAI', b).style.display = ok ? '' : 'none'; if (ok) $('#lnkOpen', b).href = v; };
+    $('#il', b).oninput = lnkUpd; lnkUpd();
+    const runLink = async () => {
+      const url = $('#il', b).value.trim(), msg = $('#lnkMsg', b); if (!/^https?:\/\//.test(url)) return;
+      if (!(S.settings.apiKey || '').trim()) { msg.textContent = 'לשליפת פרטים מהקישור צריך מפתח AI בהגדרות. אפשר למלא ידנית.'; return; }
+      $('#lnkAI', b).disabled = true; msg.textContent = '🔎 קורא את עמוד המוצר…';
+      try { const a = await aiFromLink(url, (m) => msg.textContent = m);
+        const set = (id, v, force) => { if (v && (force || !$(id, b).value.trim())) $(id, b).value = v; };
+        set('#in', a.name, !it); set('#is', a.brand); set('#im', a.model); set('#id', a.dims); set('#ico', a.color); set('#ipr', a.price);
+        if (a.category && R().catCats.includes(a.category)) { $('#ic', b).value = a.category; fillSubs(subsOf(a.category).includes(a.subcategory) ? a.subcategory : ''); }
+        const note = [a.material, a.note].filter(Boolean).join(' · '); if (note && !$('#ino', b).value.trim()) $('#ino', b).value = note;
+        let got = false;
+        if (!newImg && !mainSrc && a.image) { const d = await urlToData(a.image); if (d) { newImg = d; newHash = await imgHash(d); mainSrc = d; refreshViews(); $('#aiId', b).style.display = ''; got = true; } }
+        msg.innerHTML = `✓ מולאו פרטים מהקישור — לבדוק לפני שמירה.${newImg || mainSrc ? '' : `<br>📷 <b>התמונה:</b> האתר לא מאפשר למשוך אותה ישירות. באתר: לחיצה ארוכה על תמונת המוצר ← "שיתוף" ← מעצב חכם (התמונה תתווסף לטיוטה הזו), או לשמור את התמונה וללחוץ "📷 תמונת המוצר".`}${got ? ' התמונה נמשכה מהאתר.' : ''}`;
+      } catch (e) { msg.textContent = 'לא הצלחתי לקרוא את הקישור (' + e.message + '). אפשר למלא ידנית או לזהות מהתמונה.'; }
+      $('#lnkAI', b).disabled = false;
+    };
+    $('#lnkAI', b).onclick = runLink;
+    if (pre?.auto && pre.link) setTimeout(runLink, 300);
     $('#pickI', b).onclick = async () => {
       const [f] = await pickPhoto(); if (!f) return;
       const data = await catalogImageData(f); const h = await imgHash(data);
@@ -2074,7 +2138,7 @@ function itemForm(it, defCat, defSub) {
       } catch (e) { msg.textContent = e.message; }
       btn.disabled = false;
     };
-    $('#ok', b).onclick = async () => {
+    const doSave = async () => {
       const name = $('#in', b).value.trim(); if (!name) return toast('צריך שם למוצר');
       const d = { review: false, reviewWhy: [], pending: false, name, cat: $('#ic', b).value, sub: $('#isub', b).value, model: $('#im', b).value.trim(), supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
       if (newImg) { d.img = await putImg(newImg); d.ph = newHash || await imgHash(newImg); d.th = await makeThumb(newImg); d.cut = ''; d.cutTried = 0; }
@@ -2084,8 +2148,11 @@ function itemForm(it, defCat, defSub) {
       if (it) Object.assign(it, d); else { target = { id: uid(), ...d }; S.catalog.push(target); }
       if (siblings(target).length < 2) autoGroup(target);
       Sync.pushItem(target, newImg || (newAngs.length ? mainSrc : null));
-      save(); close(); render();
+      if (pre) DB.del('shareDraft');
+      save(); close(); render(); return target;
     };
+    $('#ok', b).onclick = doSave;
+    const ot = $('#okTry', b); if (ot) ot.onclick = async () => { const t = await doSave(); if (t) setTimeout(() => tryAtHome([t.id]), 250); };
     if (it) $('#del', b).onclick = async () => {
       if (!confirm('למחוק את המוצר? הוא יימחק גם אצל השותפים.')) return;
       await delImg(it.img); S.catalog = S.catalog.filter(x => x !== it); Sync.deleteItem(it); save(); close(); render();
@@ -2663,6 +2730,7 @@ function showHelp() {
     if (st) S = { ...S, ...st, settings: { ...S.settings, ...(st.settings || {}) } };
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   } catch (e) { toast('שגיאה בפתיחת האחסון: ' + e.message, 5000); }
+  const shq = new URLSearchParams(location.search).get('share'); if (shq) { history.replaceState(null, '', location.pathname); setTimeout(shareImport, 600); }
   const jq = new URLSearchParams(location.search).get('join');
   if (jq) { history.replaceState(null, '', location.pathname); if (!Sync.ok() || confirm('להצטרף למאגר המשותף החדש?')) Sync.join(jq); }
   migrateRules(); fixLists(); migrateTaxonomy();
