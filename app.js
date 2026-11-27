@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.1.2';
+const APP_VERSION = '1.1.3';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -742,7 +742,7 @@ const METALS = {
   bronze:    { name: 'ברונזה',   dot: '#8a6236', stops: [[38, 24, 10], [132, 92, 50], [222, 188, 128]] },
   black:     { name: 'שחור מט',  dot: '#2a2a2c', stops: [[8, 8, 9], [42, 42, 45], [128, 128, 132]] }
 };
-const COLOR_WORDS = ['זהב', 'מוזהב', 'מוזהבים', 'כסוף', 'כסופה', 'כסופים', 'כסף', 'שמפניה', 'רוז', 'גולד', 'ברונזה', 'שחור', 'שחורים'];
+const COLOR_WORDS = ['זהב', 'זהובה', 'זהובים', 'מוזהב', 'מוזהבת', 'מוזהבים', 'לבן', 'לבנה', 'לבנים', 'כסופות', 'כסוף', 'כסופה', 'כסופים', 'כסף', 'שמפניה', 'רוז', 'גולד', 'ברונזה', 'שחור', 'שחורים'];
 function metalOf(it) {
   if (it.metal) return it.metal; const c = (it.color || '') + ' ' + (it.name || '');
   return /רוז/.test(c) ? 'rose' : /שמפניה/.test(c) ? 'champagne' : /זהב|מוזהב|פליז/.test(c) ? 'gold' : /כסף|כסוף|ניקל|כרום/.test(c) ? 'silver' : /ברונזה|נחושת/.test(c) ? 'bronze' : /שחור/.test(c) ? 'black' : '';
@@ -757,37 +757,25 @@ function collapseGroups(list) { // נציג לכל קבוצה: המוצר המק
   return [...pos.entries()].sort((a, b) => a[1] - b[1]).map(([g]) => rep.get(g));
 }
 function dotsHTML(it, cur) { const sib = siblings(it); if (sib.length < 2) return ''; return `<div class="cdots">${sib.map(x => `<span class="cdot${x.id === cur ? ' on' : ''}" data-vid="${x.id}" title="${esc(x.color || METALS[metalOf(x)]?.name || '')}" style="background:${dotColor(x)}"></span>`).join('')}</div>`; }
-// צביעה מחדש של גזירה: מפת גוונים לפי בהירות (שומר הברקות וצללים), בלי לגעת בנרות לבנים/זכוכית
-async function recolorCut(src, key, baseMetal) {
-  const im = await loadImg(src), W = im.width, H = im.height, c = document.createElement('canvas'); c.width = W; c.height = H;
-  const x = c.getContext('2d'); x.drawImage(im, 0, 0); const d = x.getImageData(0, 0, W, H), p = d.data, st = METALS[key].stops;
-  const protectWhite = baseMetal && baseMetal !== 'silver' && baseMetal !== 'black';
-  const Ls = []; for (let i = 0; i < p.length; i += 16) if (p[i + 3] > 60) Ls.push((p[i] * .3 + p[i + 1] * .59 + p[i + 2] * .11) / 255);
-  Ls.sort((a, b) => a - b); const lo = Ls[Math.floor(Ls.length * .02)] || 0, hi = Ls[Math.floor(Ls.length * .98)] || 1;
-  const grad = (t) => { const a = t < .5 ? st[0] : st[1], b = t < .5 ? st[1] : st[2], k = t < .5 ? t * 2 : (t - .5) * 2; return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k]; };
-  for (let i = 0; i < p.length; i += 4) {
-    if (p[i + 3] < 8) continue; const r = p[i], g = p[i + 1], b = p[i + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b), sat = mx ? (mx - mn) / mx : 0, L = (r * .3 + g * .59 + b * .11) / 255;
-    if (protectWhite && ((sat < 0.12 && L > 0.8) || (sat < 0.4 && L > 0.5))) continue; // נר לבן / זכוכית — נשאר (המתכת הזהובה רוויה יותר)
-    const t = Math.max(0, Math.min(1, (L - lo) / Math.max(.05, hi - lo))), [nr, ng, nb] = grad(t);
-    p[i] = nr; p[i + 1] = ng; p[i + 2] = nb;
-  }
-  x.putImageData(d, 0, 0); const u = c.toDataURL('image/webp', 0.9); return u.startsWith('data:image/webp') ? u : c.toDataURL('image/png');
-}
 async function onWhite(src) { const im = await loadImg(src), pad = Math.round(Math.max(im.width, im.height) * .06), c = document.createElement('canvas'); c.width = im.width + pad * 2; c.height = im.height + pad * 2; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, pad, pad); return c.toDataURL('image/jpeg', 0.9); }
 const stripColor = (name) => name.split(/\s+/).filter(w => !COLOR_WORDS.includes(w.replace(/[^֐-׿]/g, ''))).join(' ').replace(/\s+—.*$/, '').trim();
-async function makeVariants(base, keys, onStatus) {
-  const cut = await itemCutout(base); if (!cut) throw new Error('אין תמונה למוצר');
-  const bm = metalOf(base); base.grp = grpOf(base); if (!base.metal && bm) base.metal = bm; base.updated = Date.now(); base.synced = false; Sync.pushItem(base);
-  const made = [];
-  for (const k of keys) {
-    if (siblings(base).some(x => metalOf(x) === k)) continue;
-    onStatus && onStatus(`יוצר ${METALS[k].name}…`);
-    const vc = await recolorCut(cut, k, bm), img = await onWhite(vc);
-    const it = { ...base, id: uid(), grp: base.grp, metal: k, color: METALS[k].name, name: `${stripColor(base.name)} — ${METALS[k].name}`, img: await putImg(img), cut: await putImg(vc), th: await makeThumb(img), angles: [], review: false, ph: await imgHash(img), created: Date.now(), updated: Date.now(), synced: false, variantOf: base.id };
-    delete it.cutTried; delete it.cutPending; it.cutPending = true;
-    S.catalog.push(it); made.push(it); save(); Sync.pushItem(it, img);
-  }
-  return made;
+// אותו מוצר בצבע אחר (רק תמונות מקוריות!): שם זהה בלי מילות הצבע + צבע שונה → אותה קבוצה עם נקודות צבע
+function autoGroup(it) {
+  if (!it || it.deleted || it.pending) return false; const nm = stripColor(it.name || ''); if (nm.length < 4) return false;
+  const m0 = metalOf(it) || (it.color || '').trim(); if (!m0) return false;
+  const o = S.catalog.find(x => x !== it && !x.deleted && !x.pending && grpOf(x) !== grpOf(it) && stripColor(x.name || '') === nm && (metalOf(x) || (x.color || '').trim()) && (metalOf(x) || x.color.trim()) !== m0);
+  if (!o) return false; linkItems(it, o); toast(`🎨 זוהה: "${nm}" בצבע נוסף — מוצג בכרטיס אחד עם נקודות צבע`); return true;
+}
+function linkItems(a, b) { const g = grpOf(b); for (const x of siblings(a)) { x.grp = g; x.updated = Date.now(); x.synced = false; Sync.pushItem(x); } b.grp = g; b.updated = Date.now(); b.synced = false; Sync.pushItem(b); save(); }
+function linkColorDialog(it, after) {
+  const list = S.catalog.filter(x => !x.deleted && !x.pending && grpOf(x) !== grpOf(it) && x.cat === it.cat);
+  modal('🔗 אותו מוצר — בצבע אחר', `<div class="muted">בוחרים את התמונה המקורית של אותו מוצר בצבע אחר. שניהם יוצגו בכרטיס אחד עם נקודות צבע.</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;max-height:55vh;overflow:auto">${list.map(x => `<button class="card" data-lk="${x.id}" style="padding:4px;margin:0;border:1px solid #e6ddd2"><img data-th="${x.id}" style="width:100%;aspect-ratio:1;object-fit:contain;background:#fff;border-radius:8px"><div style="font-size:11px;line-height:1.2">${esc(x.name)}</div></button>`).join('') || '<div class="muted">אין מוצרים נוספים בקטגוריה הזו</div>'}</div>
+    ${siblings(it).length > 1 ? '<button class="btn sec full" id="lkOff" style="margin-top:8px">✂️ להוציא את המוצר הזה מהקבוצה</button>' : ''}`, (b, close) => {
+    b.querySelectorAll('[data-th]').forEach(async im => { const x = S.catalog.find(y => y.id === im.dataset.th); im.src = x?.th || await getImg(x?.img) || ''; });
+    b.querySelectorAll('[data-lk]').forEach(bt => bt.onclick = () => { const o = S.catalog.find(x => x.id === bt.dataset.lk); if (!o) return; linkItems(it, o); close(); toast('חוברו — כרטיס אחד עם נקודות צבע'); after && after(); });
+    const off = $('#lkOff', b); if (off) off.onclick = () => { it.grp = it.id; it.updated = Date.now(); it.synced = false; Sync.pushItem(it); save(); close(); toast('הוצא מהקבוצה'); after && after(); };
+  });
 }
 // ✂️ פירוק סט: כל חלק שקוף נפרד בגזירה = פריט בודד (למשל 3 פמוטים בתמונה אחת)
 const PART_CACHE = {};
@@ -830,20 +818,6 @@ function choosePartsDialog(it, parts) {
       $('#cpSel', b).onclick = () => { const sel = [...b.querySelectorAll('[data-pi]:checked')].map(x => +x.dataset.pi); if (!sel.length) return toast('מסמנים לפחות פריט אחד'); fin(sel); close(); };
       const ob = new MutationObserver(() => { if (!b.isConnected) { ob.disconnect(); fin(undefined); } }); ob.observe(document.body, { childList: true, subtree: true });
     });
-  });
-}
-function variantsDialog(it, after) {
-  const have = new Set(siblings(it).map(metalOf));
-  modal('🎨 גרסאות צבע', `<div class="muted">יוצרים לאותו מוצר גרסאות בגימורים אחרים. כולן יופיעו בכרטיס אחד, ומחליפים ביניהן בנקודות הצבע.</div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">${Object.entries(METALS).map(([k, m]) => `<label class="chip" style="gap:6px;${have.has(k) ? 'opacity:.45' : ''}"><input type="checkbox" data-mk="${k}" ${have.has(k) ? 'disabled checked' : ['gold', 'champagne', 'silver'].includes(k) ? 'checked' : ''}><span class="cdot" style="background:${m.dot}"></span>${m.name}${have.has(k) ? ' ✓' : ''}</label>`).join('')}</div>
-    <div class="muted">מתאים למוצרי מתכת (פמוטים, ידיות, מנורות, ברזים). נרות וזכוכית נשארים כמו שהם.</div>
-    <button class="btn full" id="vGo" style="margin-top:10px">🎨 ליצור</button><div id="vSt" class="muted" style="text-align:center;margin-top:6px"></div>`, (b, close) => {
-    $('#vGo', b).onclick = async () => {
-      const keys = [...b.querySelectorAll('[data-mk]:checked:not(:disabled)')].map(x => x.dataset.mk); if (!keys.length) return toast('בוחרים צבע');
-      $('#vGo', b).disabled = true;
-      try { const made = await makeVariants(it, keys, m => { const e = $('#vSt', b); if (e) e.textContent = m; }); close(); toast(`נוצרו ${made.length} גרסאות צבע`); after && after(made); }
-      catch (e) { $('#vSt', b).textContent = e.message; $('#vGo', b).disabled = false; }
-    };
   });
 }
 
@@ -1946,7 +1920,7 @@ async function sortQueue(queue, useWeb, pr, dups = 0) {
     const [it, data] = queue[i];
     const line = (m) => pr.innerHTML = `<div class="rule"><span class="dot"></span><div><b>ממיין ${i + 1} מתוך ${queue.length}</b><br><span class="muted">${esc(m)}</span></div></div>`;
     line('מזהה…');
-    try { await sortOne(it, data, useWeb, line); ok++; if (it.review) rev++; Sync.pushItem(it); save(); }
+    try { await sortOne(it, data, useWeb, line); ok++; if (it.review) rev++; autoGroup(it); Sync.pushItem(it); save(); }
     catch (e) { fail++; it.reviewWhy = ['המיון האוטומטי לא הצליח (' + e.message + ') — אפשר ללחוץ "המשך מיון" מאוחר יותר']; save(); if (/מפתח|חיוב|403/.test(e.message)) break; }
   }
   pr.innerHTML = `<div class="rule green"><span class="dot green"></span><div><b>סיום!</b> מוינו ${ok} תמונות.
@@ -1989,7 +1963,7 @@ async function bulkAdd(cat, sub = '') {
       } catch { aiFail++; }
     }
     it.img = await putImg(data); it.cut = ''; it.cutTried = 0;
-    S.catalog.push(it); Sync.pushItem(it, data); added++;
+    S.catalog.push(it); autoGroup(it); Sync.pushItem(it, data); added++;
   }
   save(); render();
   const msg = [`נוספו ${added} תמונות ל"${cat}".`];
@@ -2019,7 +1993,7 @@ function itemForm(it, defCat, defSub) {
       <div id="angStrip" class="angstrip"></div>
       <div class="grid2" style="margin-top:8px"><button class="btn sec" id="pickI">📷 ${it ? 'החלפת תמונה' : 'תמונת המוצר'}</button>
         <button class="btn sec" id="addAng">🔄 + זוויות נוספות</button></div>
-      ${it ? `<div class="row" style="justify-content:center;gap:10px;margin-top:8px">${siblings(it).length > 1 ? `<span class="muted">צבעים:</span>${dotsHTML(it, it.id)}` : ''}<button class="btn sec sm" id="mkVar">🎨 גרסאות צבע</button></div>` : ''}
+      ${it ? `<div class="row" style="justify-content:center;gap:10px;margin-top:8px">${siblings(it).length > 1 ? `<span class="muted">צבעים:</span>${dotsHTML(it, it.id)}` : ''}<button class="btn sec sm" id="mkVar">🔗 אותו מוצר בצבע אחר</button></div><div id="partStrip"></div>` : ''}
       <button class="btn full" id="aiId" style="margin-top:8px;${it?.img ? '' : 'display:none'}">🤖 זיהוי אוטומטי מהתמונה</button>
       <div id="aiMsg" class="muted" style="margin-top:6px"></div></div>
     ${it?.review ? `<div class="rule orange" style="margin-top:10px"><span class="dot orange"></span><div><b>⚠️ לבירור:</b><br>${(it.reviewWhy || []).map(esc).join('<br>')}
@@ -2042,7 +2016,9 @@ function itemForm(it, defCat, defSub) {
     ${it ? '<div style="height:8px"></div><button class="btn danger full" id="del">מחיקת המוצר</button>' : ''}`, async (b, close) => {
     if (it) {
       b.querySelectorAll('[data-vid]').forEach(dt => dt.onclick = () => { const v = S.catalog.find(x => x.id === dt.dataset.vid); if (v && v.id !== it.id) { close(); setTimeout(() => itemForm(v), 120); } });
-      const mv = b.querySelector('#mkVar'); if (mv) mv.onclick = () => variantsDialog(it, () => { close(); render(); setTimeout(() => itemForm(it), 150); });
+      const mv = b.querySelector('#mkVar'); if (mv) mv.onclick = () => linkColorDialog(it, () => { close(); render(); setTimeout(() => itemForm(it), 150); });
+      (async () => { const ps = await itemParts(it).catch(() => []), ps0 = $('#partStrip', b); if (!ps0 || ps.length < 2) return; // ✂️ סט → כל פריט בנפרד
+        ps0.innerHTML = `<div class="muted" style="margin-top:8px;text-align:center">✂️ בסט יש ${ps.length} פריטים נפרדים — ב"📸 לנסות אצלי" ובתלת־ממד בוחרים את כולם או רק חלק</div><div style="display:flex;gap:6px;justify-content:center;margin-top:4px">${ps.map(p => `<div style="width:54px;height:70px;display:flex;align-items:flex-end;justify-content:center;background:#f6f2ec;border-radius:8px;padding:3px"><img src="${p.url}" style="max-width:100%;max-height:100%"></div>`).join('')}</div>`; })();
     }
     const ip = $('#ip', b);
     const fillSubs = (want) => { const l = subsOf($('#ic', b).value); $('#isub', b).innerHTML = `<option value="">—</option>` + l.map(x => `<option ${x === want ? 'selected' : ''}>${esc(x)}</option>`).join(''); $('#isub', b).disabled = !l.length; };
@@ -2106,6 +2082,7 @@ function itemForm(it, defCat, defSub) {
       d.angles = angIds; for (const r of removed) delImg(r);
       let target = it;
       if (it) Object.assign(it, d); else { target = { id: uid(), ...d }; S.catalog.push(target); }
+      if (siblings(target).length < 2) autoGroup(target);
       Sync.pushItem(target, newImg || (newAngs.length ? mainSrc : null));
       save(); close(); render();
     };
