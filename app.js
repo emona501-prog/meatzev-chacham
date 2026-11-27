@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.0.4';
+const APP_VERSION = '1.0.5';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -169,6 +169,7 @@ function setHeader(title, back) {
 }
 
 async function render() {
+  if (V.tab === 'catalog') { clearTimeout(render.ct); render.ct = setTimeout(ensureCuts, 4000); }
   const app = $('#app');
   if (!V.planOpen) document.body.classList.remove('planfs', 'toolsOpen', 'propsOpen');
   if (V.tab === 'projects') {
@@ -732,6 +733,52 @@ function flipbook(list, start = 0, projectId = '') {
 // 📸 לנסות אצלי — מצלמים פינה בבית (או מצלמה חיה) ומניחים עליה מוצרים מהקטלוג
 // גרירה = הזזה · שתי אצבעות = הגדלה וסיבוב · הידית ↘ = הגדלה וסיבוב באצבע אחת
 const CUT_CACHE = {};
+// ✂️ גזירה נקייה אוטומטית עם AI: ה-AI מזהה את המוצר (מסכת סגמנטציה), והרקע נעלם — גם כשהמוצר לבן/כסוף
+async function aiCutout(it) {
+  const src = (await getImg(it.img)) || (await Sync.fetchImg(it.img)); if (!src) throw new Error('אין תמונה');
+  const im = await loadImg(src), sc = Math.min(1, 1024 / Math.max(im.width, im.height)), W = Math.round(im.width * sc), H = Math.round(im.height * sc);
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d'); x.drawImage(im, 0, 0, W, H);
+  const send = c.toDataURL('image/jpeg', 0.9).split(',')[1];
+  const prompt = `Give the segmentation masks for the product(s) shown in this catalog photo (${it.name || 'decor item'}). Include every physical part of the product: candles, glass, stems, bases, cables. Exclude the background, floor and cast shadows.
+Output a JSON list where each entry has "box_2d" ([y0,x0,y1,x1] normalized 0-1000), "mask" (base64 PNG probability map of the box area) and "label".`;
+  const txt = await geminiText([{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data: send } }], true, null, { timeout: 90000 });
+  let arr; try { arr = JSON.parse(txt.replace(/^```json|```$/g, '').trim()); } catch { throw new Error('תשובה לא תקינה'); }
+  if (!Array.isArray(arr)) arr = arr.masks || arr.items || [arr];
+  const m = document.createElement('canvas'); m.width = W; m.height = H; const mx = m.getContext('2d'); mx.globalCompositeOperation = 'lighten'; let n = 0;
+  for (const e of arr) {
+    if (!e?.mask || !e.box_2d) continue; const [y0, x0, y1, x1] = e.box_2d.map(v => v / 1000);
+    const mi = await loadImg(e.mask.startsWith('data:') ? e.mask : 'data:image/png;base64,' + e.mask).catch(() => null); if (!mi) continue;
+    mx.drawImage(mi, x0 * W, y0 * H, (x1 - x0) * W, (y1 - y0) * H); n++;
+  }
+  if (!n) throw new Error('לא התקבלה מסכה');
+  const md = mx.getImageData(0, 0, W, H).data, d = x.getImageData(0, 0, W, H), p = d.data;
+  let cover = 0;
+  for (let k = 0; k < W * H; k++) {
+    const i = k * 4, mk = md[i] / 255; let a = mk < 0.35 ? 0 : mk > 0.65 ? 1 : (mk - 0.35) / 0.3;
+    if (a > 0 && a < 1) { const mn = Math.min(p[i], p[i + 1], p[i + 2]); a = Math.max(a * 0.6, Math.min(1, (255 - mn) / 255 * 1.6)); for (let q = 0; q < 3; q++) p[i + q] = Math.max(0, Math.min(255, (p[i + q] - (1 - a) * 255) / Math.max(a, .05))); }
+    p[i + 3] = Math.round(a * 255); if (a > .5) cover++;
+  }
+  if (cover < W * H * 0.01) throw new Error('המסכה ריקה');
+  x.putImageData(d, 0, 0);
+  // חיתוך לגבולות
+  let bx0 = W, by0 = H, bx1 = 0, by1 = 0; for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) if (p[(yy * W + xx) * 4 + 3] > 20) { if (xx < bx0) bx0 = xx; if (xx > bx1) bx1 = xx; if (yy < by0) by0 = yy; if (yy > by1) by1 = yy; }
+  const o = document.createElement('canvas'); o.width = bx1 - bx0 + 1; o.height = by1 - by0 + 1; o.getContext('2d').drawImage(c, -bx0, -by0);
+  let url = o.toDataURL('image/webp', 0.88); if (!url.startsWith('data:image/webp')) url = o.toDataURL('image/png');
+  return url;
+}
+// תור רקע: כל מוצר בלי גזירה מקבל גזירה נקייה (אחד אחרי השני, בלי להפריע)
+let cutBusy = false;
+async function ensureCuts() {
+  if (cutBusy || !(S.settings.apiKey || '').trim() || S.settings.autoCut === false) return;
+  if (Sync.ok() && Date.now() - (S.sync.last || 0) > 6e5) return; // קודם מסנכרנים — אולי כבר יש גזירה במאגר
+  cutBusy = true;
+  try {
+    for (const it of S.catalog.filter(x => !x.deleted && x.img && !x.cut && !(x.cutTried > Date.now() - 864e5))) {
+      try { const url = await aiCutout(it); it.cut = await putImg(url); it.cutPending = true; it.updated = Date.now(); it.synced = false; save(); Sync.pushItem(it); }
+      catch (e) { it.cutTried = Date.now(); save(); console.warn('cut', it.name, e.message); if (/מפתח|key|billing/i.test(e.message)) break; }
+    }
+  } finally { cutBusy = false; }
+}
 // גזירה מוכנה מראש (שקופה, איכותית) אם יש למוצר — אחרת גזירה מהירה בטלפון
 async function itemCutout(it) {
   if (it.cut) { const c = (await getImg(it.cut)) || (await Sync.fetchImg(it.cut)); if (c) return c; }
@@ -784,7 +831,7 @@ function tryAtHome(startIds = []) {
     #tryv input[type=range]{width:110px}
   </style>
   <div class="tb"><button class="btn sm" id="tX">✕</button><b style="flex:1">📸 לנסות אצלי</b>
-    <button class="btn sec sm" id="tNew">🖼️ תמונה אחרת</button><button class="btn sec sm" id="tSave">💾 שמירה</button><button class="btn sm" id="tAI">✨ ריאליסטי</button></div>
+    <button class="btn sec sm" id="tUndo" title="פעולה אחורה" disabled>↶</button><button class="btn sec sm" id="tRedo" title="פעולה קדימה" disabled>↷</button><button class="btn sec sm" id="tNew">🖼️ תמונה אחרת</button><button class="btn sec sm" id="tSave">💾 שמירה</button><button class="btn sm" id="tAI">✨ ריאליסטי</button></div>
   <div class="main"><div class="stage" id="tStage"><div class="start" id="tStart">
       <div style="font-size:44px">🛋️📸</div><div style="max-width:300px;color:#ddd">מצלמים את השולחן, הפינה או המדף — ואז בוחרים מוצרים מהסרגל בצד ומניחים אותם על התמונה.</div>
       <button class="btn" id="tCam">📷 מצלמה חיה</button><button class="btn sec" id="tShot">📸 לצלם תמונה</button><button class="btn sec" id="tGal">🖼️ תמונה מהגלריה</button></div></div>
@@ -842,15 +889,34 @@ function tryAtHome(startIds = []) {
     if (t) { ov.querySelector('#tLight').value = t.light; ov.querySelector('#tShadow').value = t.shadow; }
     rail.querySelectorAll('.ri').forEach(r => r.classList.toggle('on', stks.some(s => s.id === r.dataset.id)));
   }
+  // ↶ ↷ היסטוריית פעולות — ללא הגבלה
+  const cutSrc = {}, HIST = [], hb = () => { ov.querySelector('#tUndo').disabled = hi <= 0; ov.querySelector('#tRedo').disabled = hi >= HIST.length - 1; };
+  let hi = -1;
+  const snapS = () => JSON.stringify(stks.map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, rot: t.rot, flip: t.flip, light: t.light, shadow: t.shadow })));
+  function record() { const sn = snapS(); if (HIST[hi] === sn) return; HIST.length = hi + 1; HIST.push(sn); hi = HIST.length - 1; hb(); }
+  async function mkStk(it, state) {
+    const cut = cutSrc[it.id] || (cutSrc[it.id] = await itemCutout(it)); if (!cut) return null;
+    const el = document.createElement('div'); el.className = 'stk'; el.innerHTML = `<img src="${cut}"><div class="hd">↘</div>`;
+    const t = { id: it.id, it, el, x: .5, y: .55, w: .28, rot: 0, flip: false, light: 100, shadow: 55, ...state, el, it };
+    wrap.appendChild(el); stks.push(t); await new Promise(r => { const i = el.querySelector('img'); i.complete ? r() : i.onload = r; }); place(t); bindStk(t); return t;
+  }
+  async function restore(sn) {
+    stks.splice(0).forEach(t => t.el.remove()); selectStk(null);
+    for (const st of JSON.parse(sn)) { const it = S.catalog.find(x => x.id === st.id); if (it) await mkStk(it, st); }
+    selectStk(null); hb();
+  }
+  ov.querySelector('#tUndo').onclick = () => { if (hi > 0) { hi--; restore(HIST[hi]); } };
+  ov.querySelector('#tRedo').onclick = () => { if (hi < HIST.length - 1) { hi++; restore(HIST[hi]); } };
   async function addStk(it, from) {
     if (!wrap) { toast('קודם מצלמים או בוחרים תמונה של המקום'); return; }
-    const cut = await itemCutout(it); if (!cut) return toast('אין תמונה למוצר הזה');
-    const el = document.createElement('div'); el.className = 'stk'; el.innerHTML = `<img src="${cut}"><div class="hd">↘</div>`;
-    const t = from ? { ...from, el, x: Math.min(.9, from.x + .06) } : { id: it.id, it, el, x: .5, y: .55, w: .28, rot: 0, flip: false, light: 100, shadow: 55 };
-    wrap.appendChild(el); stks.push(t); await new Promise(r => { const i = el.querySelector('img'); i.complete ? r() : i.onload = r; }); place(t); selectStk(t); bindStk(t);
+    if (hi < 0) record(); // מצב התחלתי (ריק)
+    const t = await mkStk(it, from ? { x: Math.min(.9, from.x + .06), y: from.y, w: from.w, rot: from.rot, flip: from.flip, light: from.light, shadow: from.shadow } : {});
+    if (!t) return toast('אין תמונה למוצר הזה');
+    selectStk(t); record();
   }
   function bindStk(t) {
     const pts = new Map(); let g = null;
+    let changedG = false;
     const st = () => { const v = [...pts.values()]; if (v.length >= 2) { const [a, b] = v; g = { pinch: true, d: Math.hypot(a.x - b.x, a.y - b.y), ang: Math.atan2(b.y - a.y, b.x - a.x), w: t.w, rot: t.rot }; } else if (v.length === 1) { const [a] = v; g = { x: a.x, y: a.y, tx: t.x, ty: t.y }; } else g = null; };
     t.el.addEventListener('pointerdown', e => {
       e.stopPropagation(); t.el.setPointerCapture(e.pointerId); selectStk(t);
@@ -864,20 +930,21 @@ function tryAtHome(startIds = []) {
       if (g.handle) { const d = Math.hypot(e.clientX - g.cx, e.clientY - g.cy), a = Math.atan2(e.clientY - g.cy, e.clientX - g.cx); t.w = Math.max(.03, Math.min(1.5, g.w * d / g.d)); t.rot = g.rot + (a - g.ang) * 180 / Math.PI; }
       else if (g.pinch && pts.size >= 2) { const [a, b] = [...pts.values()]; t.w = Math.max(.03, Math.min(1.5, g.w * Math.hypot(a.x - b.x, a.y - b.y) / g.d)); t.rot = g.rot + (Math.atan2(b.y - a.y, b.x - a.x) - g.ang) * 180 / Math.PI; }
       else if (!g.pinch) { t.x = g.tx + (e.clientX - g.x) / W; t.y = g.ty + (e.clientY - g.y) / H; }
-      const near = Math.round(t.rot / 90) * 90; if (Math.abs(t.rot - near) < 3) t.rot = near; place(t);
+      const near = Math.round(t.rot / 90) * 90; if (Math.abs(t.rot - near) < 3) t.rot = near; place(t); changedG = true;
     });
-    const up = e => { pts.delete(e.pointerId); if (g?.handle) g = null; else st(); };
+    const up = e => { pts.delete(e.pointerId); if (g?.handle) g = null; else st(); if (!pts.size && changedG) { changedG = false; record(); } };
     t.el.addEventListener('pointerup', up); t.el.addEventListener('pointercancel', up);
   }
   sbar.querySelectorAll('[data-s]').forEach(b => b.onclick = () => {
     if (!sel) return; const a = b.dataset.s;
-    if (a === 'flip') { sel.flip = !sel.flip; place(sel); }
-    if (a === 'front') { wrap.appendChild(sel.el); stks.push(stks.splice(stks.indexOf(sel), 1)[0]); }
+    if (a === 'flip') { sel.flip = !sel.flip; place(sel); record(); }
+    if (a === 'front') { wrap.appendChild(sel.el); stks.push(stks.splice(stks.indexOf(sel), 1)[0]); record(); }
     if (a === 'dup') addStk(sel.it, sel);
-    if (a === 'del') { sel.el.remove(); stks.splice(stks.indexOf(sel), 1); selectStk(null); }
+    if (a === 'del') { sel.el.remove(); stks.splice(stks.indexOf(sel), 1); selectStk(null); record(); }
   });
   ov.querySelector('#tLight').oninput = e => { if (sel) { sel.light = +e.target.value; place(sel); } };
   ov.querySelector('#tShadow').oninput = e => { if (sel) { sel.shadow = +e.target.value; place(sel); } };
+  ov.querySelector('#tLight').onchange = ov.querySelector('#tShadow').onchange = () => record();
   // ---- סרגל המוצרים ----
   const all = S.catalog.filter(x => !x.deleted && x.img);
   const projPicks = S.projects.flatMap(p => p.picks || []);
@@ -1785,7 +1852,7 @@ async function bulkAdd(cat, sub = '') {
         Object.assign(it, { name: a.name || it.name, sub: subsOf(cat).includes(a.sub) ? a.sub : (it.sub || ''), model: a.model || '', supplier: a.brand || '', dims: a.dims || '', color: a.color || '', price: a.price || '', note: [a.material, a.note].filter(Boolean).join(' · ') });
       } catch { aiFail++; }
     }
-    it.img = await putImg(data);
+    it.img = await putImg(data); it.cut = ''; it.cutTried = 0;
     S.catalog.push(it); Sync.pushItem(it, data); added++;
   }
   save(); render();
@@ -1893,7 +1960,7 @@ function itemForm(it, defCat, defSub) {
     $('#ok', b).onclick = async () => {
       const name = $('#in', b).value.trim(); if (!name) return toast('צריך שם למוצר');
       const d = { review: false, reviewWhy: [], pending: false, name, cat: $('#ic', b).value, sub: $('#isub', b).value, model: $('#im', b).value.trim(), supplier: $('#is', b).value.trim(), dims: $('#id', b).value.trim(), color: $('#ico', b).value.trim(), price: $('#ipr', b).value.trim(), link: $('#il', b).value.trim(), note: $('#ino', b).value.trim(), updated: Date.now() };
-      if (newImg) { d.img = await putImg(newImg); d.ph = newHash || await imgHash(newImg); d.th = await makeThumb(newImg); }
+      if (newImg) { d.img = await putImg(newImg); d.ph = newHash || await imgHash(newImg); d.th = await makeThumb(newImg); d.cut = ''; d.cutTried = 0; }
       for (const a of newAngs) angIds.push(await putImg(a));
       d.angles = angIds; for (const r of removed) delImg(r);
       let target = it;
@@ -1934,11 +2001,12 @@ const Sync = {
     }
     return r.json();
   },
-  meta(it) { const { img, updated, ...rest } = it; return rest; },
+  meta(it) { const { img, updated, cutPending, cutTried, ...rest } = it; return rest; },
   async pushItem(it, imgData) {
     if (!this.ok()) return;
     try {
       if (imgData && it.img) await this.req(`/imgs/${it.img}`, { method: 'PATCH', body: JSON.stringify({ fields: { data: { stringValue: imgData } } }) });
+      if (it.cut && (imgData || it.cutPending)) { const cd = await getImg(it.cut); if (cd) await this.req(`/imgs/${it.cut}`, { method: 'PATCH', body: JSON.stringify({ fields: { data: { stringValue: cd } } }) }); delete it.cutPending; }
       if (imgData) for (const a of it.angles || []) { const ad = await getImg(a); if (ad) await this.req(`/imgs/${a}`, { method: 'PATCH', body: JSON.stringify({ fields: { data: { stringValue: ad } } }) }); }
       await this.req(`/items/${it.id}`, { method: 'PATCH', body: JSON.stringify({ fields: {
         meta: { stringValue: JSON.stringify(this.meta(it)) }, img: { stringValue: it.img || '' },
@@ -2007,7 +2075,7 @@ const Sync = {
       // מה שעוד לא עלה מהטלפון הזה (בסנכרון מלא: גם מה שחסר בענן)
       for (const it of S.catalog.filter(x => !x.synced || (full && !seen.has(x.id)))) { await this.pushItem(it, await getImg(it.img)); if (it.synced) sent++; }
       S.sync.cursor = maxU; if (full) S.sync.fullAt = Date.now(); S.sync.err = '';
-      S.sync.last = Date.now(); save();
+      S.sync.last = Date.now(); save(); setTimeout(ensureCuts, 2000);
       if (manual || got) toast(`הסנכרון הושלם${got ? ` · התקבלו ${got} עדכונים` : ''}${sent ? ` · נשלחו ${sent}` : ''}`);
       if (rulesGot && manual) toast('הכללים עודכנו מהמאגר');
       if ((got && V.tab === 'catalog') || ((rulesGot || aiGot) && V.tab !== 'projects')) render();
