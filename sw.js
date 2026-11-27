@@ -1,5 +1,5 @@
 // מעצב חכם — עבודה גם בלי אינטרנט (חוץ מה-AI)
-const CACHE = 'meatzev-v0.9.9';
+const CACHE = 'meatzev-v1.0.0';
 const FILES = ['./', 'index.html', 'app.js', 'rules.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'plan.js', 'media/logo.png', 'apple-touch-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });

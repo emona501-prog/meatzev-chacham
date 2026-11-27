@@ -108,7 +108,11 @@ const fmt = (n) => Math.round(n);
 // ---------------- כללים ----------------
 function openingRule(w, kind) {
   const n = kind === 'door' ? 'דלת' : 'חלון';
-  if (w.type === 'mamad') return { level: 'red', msg: `אסור לפרוץ ${n} בקיר ממ"ד (קיר הדף).` };
+  if (w.type === 'mamad') { // לממ"ד יש דלת הדף וחלון הדף מקוריים — מותר לסמן אותם, אסור לפרוץ חדשים
+    const has = (P.plan?.openings || []).some(o => o.wallId === w.id && o.kind === kind);
+    if (has) return { level: 'red', msg: `בקיר הממ"ד הזה כבר מסומן${kind === 'door' ? 'ת דלת' : ' חלון'}. אסור לפרוץ ${n} נוספ${kind === 'door' ? 'ת' : ''} בקיר ממ"ד.` };
+    return { level: 'orange', msg: `מסמנים את ה${n} המקורי${kind === 'door' ? 'ת' : ''} של הממ"ד (${kind === 'door' ? 'דלת הדף' : 'חלון הדף'})? בממ"ד מותר רק לסמן את הפתחים הקיימים — אסור לפרוץ, להרחיב או להזיז אותם.` };
+  }
   if (w.type === 'bearing') return { level: 'orange', msg: `זה קיר נושא. פריצת ${n} מחייבת אישור קונסטרוקטור. להוסיף לסקיצה בכל זאת?` };
   if (w.type === 'exterior') return { level: 'orange', msg: `זה קיר חיצוני. שינוי בחזית דורש היתר. להוסיף לסקיצה בכל זאת?` };
   if (w.type === 'unknown') return { level: 'orange', msg: `הקיר לא מאומת — לא ידוע אם הוא נושא. כדאי לבדוק עם קונסטרוקטור. להוסיף בכל זאת?` };
@@ -161,10 +165,11 @@ function hitOpening(pt) {
   }
   return null;
 }
+const AID = () => { const st = (typeof S !== 'undefined' && S.settings) || {}; return { step: st.planStep || 5, rulers: st.planRulers !== false, loupe: st.planLoupe !== false }; };
 function snap(pt, from, skip) {
-  const tol = 16 / P.view.s;
+  const tol = 16 / P.view.s, STEP = AID().step;
   for (const w of P.plan.walls) if (w !== skip) for (const e of [[w.x1, w.y1], [w.x2, w.y2]]) if (Math.hypot(pt.x - e[0], pt.y - e[1]) < tol) return { x: e[0], y: e[1], snapped: true };
-  let x = Math.round(pt.x / 5) * 5, y = Math.round(pt.y / 5) * 5;
+  let x = Math.round(pt.x / STEP) * STEP, y = Math.round(pt.y / STEP) * STEP;
   if (from) {
     const dx = x - from.x, dy = y - from.y;
     if (Math.abs(dy) < Math.abs(dx) * 0.2) y = from.y; else if (Math.abs(dx) < Math.abs(dy) * 0.2) x = from.x;
@@ -289,7 +294,42 @@ function draw() {
     }
   }
   if (P.calib?.a) extra += `<circle cx="${P.calib.a.x}" cy="${P.calib.a.y}" r="${6 / s}" fill="#c0392b"/>` + (P.cursor ? `<line x1="${P.calib.a.x}" y1="${P.calib.a.y}" x2="${P.cursor.x}" y2="${P.cursor.y}" stroke="#c0392b" stroke-width="${2 / s}"/>` : '');
-  P.svg.innerHTML = DEFS + `<g transform="translate(${P.view.tx},${P.view.ty}) scale(${s})">${grid}${bg}${planSVG(pl, { diff: !P.showOriginal && P.plan.original && P.diffOn })}${extra}</g>`;
+  if (P.lasso && P.lasso.length > 1) extra += `<path d="M${P.lasso.map(p => p.x + ',' + p.y).join(' L')}" fill="rgba(168,107,74,.12)" stroke="#a86b4a" stroke-width="${2 / s}" stroke-dasharray="${6 / s} ${4 / s}"/>`;
+  const planInner = planSVG(pl, { diff: !P.showOriginal && P.plan.original && P.diffOn });
+  let over = '';
+  // נקודה פעילה (סמן שרטוט / גרירה) — לסרגלים ולמגדלת
+  const act = P.lpt ? toWorld(P.lpt.cx, P.lpt.cy) : (P.cursor && P.gesture?.type === 'draw' ? P.cursor : null);
+  const actPt = P.gesture?.type === 'wend' ? { x: P.gesture.w['x' + P.gesture.end], y: P.gesture.w['y' + P.gesture.end] } : P.gesture?.type === 'draw' && P.cursor ? P.cursor : act;
+  if (AID().rulers) { // סרגלים בקצה העליון והימני, עם שנתות לפי הזום
+    const W = r.width, H = r.height, RS = 20; let tick = [1, 5, 10, 50, 100, 500, 1000, 5000].find(t => t * s >= 46) || 5000;
+    const lab = v => Math.abs(v) >= 100 ? (v / 100).toFixed(tick >= 100 ? 0 : 1).replace(/\.0$/, '') + 'מ' : Math.round(v) + '';
+    over += `<rect x="0" y="0" width="${W}" height="${RS}" fill="rgba(255,255,255,.9)"/><rect x="${W - RS}" y="0" width="${RS}" height="${H}" fill="rgba(255,255,255,.9)"/>`;
+    for (let v = Math.floor(x0 / tick) * tick; v <= x1; v += tick) { const X = P.view.tx + v * s; for (let k = 1; k < 5; k++) { const Xs = X + k * tick * s / 5; over += `<line x1="${Xs}" y1="${RS - 4}" x2="${Xs}" y2="${RS}" stroke="#b9ad9f" stroke-width="1"/>`; }
+      over += `<line x1="${X}" y1="${RS - 10}" x2="${X}" y2="${RS}" stroke="#6b5f54" stroke-width="1"/><text x="${X + 2}" y="10" font-size="9" fill="#6b5f54">${lab(v)}</text>`; }
+    for (let v = Math.floor(y0 / tick) * tick; v <= y1; v += tick) { const Y = P.view.ty + v * s; for (let k = 1; k < 5; k++) { const Ys = Y + k * tick * s / 5; over += `<line x1="${W - RS}" y1="${Ys}" x2="${W - RS + 4}" y2="${Ys}" stroke="#b9ad9f" stroke-width="1"/>`; }
+      over += `<line x1="${W - RS}" y1="${Y}" x2="${W - RS + 10}" y2="${Y}" stroke="#6b5f54" stroke-width="1"/><text x="${W - 2}" y="${Y - 2}" font-size="9" fill="#6b5f54" text-anchor="end">${lab(v)}</text>`; }
+    if (actPt) { const X = P.view.tx + actPt.x * s, Y = P.view.ty + actPt.y * s;
+      over += `<line x1="${X}" y1="${RS}" x2="${X}" y2="${H}" stroke="#2e7dd7" stroke-width="1" stroke-dasharray="4 3" opacity=".7"/><line x1="0" y1="${Y}" x2="${W - RS}" y2="${Y}" stroke="#2e7dd7" stroke-width="1" stroke-dasharray="4 3" opacity=".7"/>
+        <rect x="${X - 2}" y="0" width="4" height="${RS}" fill="#2e7dd7"/><rect x="${W - RS}" y="${Y - 2}" width="${RS}" height="4" fill="#2e7dd7"/>`; }
+  }
+  if (AID().loupe && actPt && P.lpt) { // 🔍 מגדלת ליד האצבע
+    const R = 62, Z = Math.min(16, Math.max(s * 4, 1.2)), px = P.lpt.cx - r.left, py = P.lpt.cy - r.top;
+    const cx = Math.max(R + 4, Math.min(r.width - R - 4, px)), cy = py - R - 70 > R ? py - R - 70 : py + R + 70;
+    const keep = P.view.s; P.view.s = Z; const inner = planSVG(pl, {}); P.view.s = keep;
+    let fine = ''; const fstep = Z > 6 ? 1 : 10; const span = R / Z;
+    for (let v = Math.floor((actPt.x - span) / fstep) * fstep; v <= actPt.x + span; v += fstep) fine += `<line x1="${v}" y1="${actPt.y - span}" x2="${v}" y2="${actPt.y + span}" stroke="${v % 10 === 0 ? '#d9cfc3' : '#efe8df'}" stroke-width="${1 / Z}"/>`;
+    for (let v = Math.floor((actPt.y - span) / fstep) * fstep; v <= actPt.y + span; v += fstep) fine += `<line x1="${actPt.x - span}" y1="${v}" x2="${actPt.x + span}" y2="${v}" stroke="${v % 10 === 0 ? '#d9cfc3' : '#efe8df'}" stroke-width="${1 / Z}"/>`;
+    let info = `${Math.round(actPt.x)} , ${Math.round(actPt.y)}`;
+    if (P.chain && P.cursor) info = `${fmt(Math.hypot(P.cursor.x - P.chain.x, P.cursor.y - P.chain.y))} ס"מ`;
+    if (P.gesture?.type === 'wend' || P.gesture?.type === 'wmove') info = `${fmt(len(P.gesture.w))} ס"מ`;
+    over += `<defs><clipPath id="lpc"><circle cx="${cx}" cy="${cy}" r="${R}"/></clipPath></defs>
+      <g clip-path="url(#lpc)"><rect x="${cx - R}" y="${cy - R}" width="${2 * R}" height="${2 * R}" fill="#fbf8f4"/>
+        <g transform="translate(${cx - actPt.x * Z},${cy - actPt.y * Z}) scale(${Z})">${fine}${inner}${P.chain && P.cursor ? `<line x1="${P.chain.x}" y1="${P.chain.y}" x2="${P.cursor.x}" y2="${P.cursor.y}" stroke="#a86b4a" stroke-width="${WALL_TYPES[P.wallType].thick}" stroke-opacity=".55"/><circle cx="${P.cursor.x}" cy="${P.cursor.y}" r="${4 / Z}" fill="${P.cursor.snapped ? '#2e8b57' : '#a86b4a'}"/>` : ''}</g></g>
+      <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="#a86b4a" stroke-width="3"/>
+      <line x1="${cx - 10}" y1="${cy}" x2="${cx + 10}" y2="${cy}" stroke="#c0392b" stroke-width="1.5"/><line x1="${cx}" y1="${cy - 10}" x2="${cx}" y2="${cy + 10}" stroke="#c0392b" stroke-width="1.5"/>
+      <rect x="${cx - 46}" y="${cy + R - 6}" width="92" height="20" rx="10" fill="#a86b4a"/><text x="${cx}" y="${cy + R + 8}" font-size="12" fill="#fff" text-anchor="middle" font-weight="700">${info}</text>`;
+  }
+  P.svg.innerHTML = DEFS + `<g transform="translate(${P.view.tx},${P.view.ty}) scale(${s})">${grid}${bg}${planInner}${extra}</g>` + over;
 }
 
 // ---------------- מסך העורך ----------------
@@ -303,6 +343,10 @@ function open(app, p) {
         <span class="chip" data-t="select">👆 בחירה</span><span class="chip" data-t="pan">✋ גלילת מסך</span>
         <span class="chip" data-t="wall">🧱 קיר</span><span class="chip" data-t="door">🚪 דלת</span><span class="chip" data-t="window">🪟 חלון</span><span class="chip" data-t="furn">🛋️ ריהוט</span>
       </div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
+        <span class="chip" data-t="magic">🪄 יישור קסם</span>
+        <span class="chip ${AID().rulers ? 'on' : ''}" id="aRul">📏 סרגלים</span><span class="chip ${AID().loupe ? 'on' : ''}" id="aLoupe">🔍 מגדלת</span>
+        <select id="aStep" style="padding:5px 8px;width:auto">${[1, 5, 10].map(v => `<option value="${v}" ${AID().step === v ? 'selected' : ''}>דיוק ${v} ס"מ</option>`).join('')}</select></div>
       <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sec sm" id="hUndo" style="flex:1">↶ ביטול</button><button class="btn sec sm" id="hRedo" style="flex:1">↷ חזרה</button><button class="btn sec sm" id="hClear" style="flex:1">🧹 ניקוי</button></div>
       <div class="row" style="margin-top:8px"><span class="muted">סוג קיר חדש:</span>
         <select id="wtSel" class="grow" style="padding:7px 10px;flex:1">${Object.entries(WALL_TYPES).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('')}</select></div>
@@ -402,11 +446,12 @@ function setTool(t) {
   if (P.showOriginal && ['wall', 'door', 'window', 'furn'].includes(t)) { toast('במצב "לפני" אי אפשר לערוך. עוברים ל"אחרי".'); t = 'select'; }
   P.tool = t; P.chain = null; P.cursor = null;
   if (t === 'furn' && !P.furnType) setTimeout(furnPicker, 50);
-  document.querySelectorAll('#tools .chip').forEach(c => c.classList.toggle('on', c.dataset.t === t));
+  document.querySelectorAll('#tools .chip, [data-t="magic"]').forEach(c => c.classList.toggle('on', c.dataset.t === t));
   $('#wtSel').value = P.wallType;
   $('#chainBar').style.display = 'none'; renderFBar();
   const hints = {
     select: 'נוגעים בקיר, פתח או רהיט כדי לערוך. קיר ורהיט גוררים באצבע · עיגול בקצה הקיר משנה אורך · ⟳ מסובב רהיט. גרירה על רקע ריק מזיזה את המבט, שתי אצבעות לזום.',
+    magic: '🪄 מקיפים באצבע בעיגול את האזור העקום — הקירות שבתוכו מתיישרים (אופקי/אנכי/45°) והפינות נסגרות. או: "יישור כל התוכנית" בסרגל למטה.',
     pan: 'גרירה מזיזה את המבט על התוכנית (לא את הקירות). כדי להזיז קיר או רהיט — עוברים ל👆 בחירה וגוררים אותו.',
     wall: 'נוגעים בנקודת ההתחלה, ואז בנקודת הסוף (אפשר לגרור כדי לכוון). הקיר הבא ממשיך מאותה נקודה. מידות נצמדות ל-5 ס"מ.',
     door: 'נוגעים על קיר כדי להוסיף דלת (90 ס"מ).',
@@ -418,6 +463,10 @@ function setTool(t) {
   draw();
 }
 function bindTools() {
+  document.querySelectorAll('[data-t="magic"]').forEach(c => c.onclick = () => setTool('magic'));
+  $('#aRul').onclick = () => { S.settings.planRulers = !AID().rulers; save(); $('#aRul').classList.toggle('on', AID().rulers); draw(); };
+  $('#aLoupe').onclick = () => { S.settings.planLoupe = !AID().loupe; save(); $('#aLoupe').classList.toggle('on', AID().loupe); toast(AID().loupe ? 'מגדלת פעילה — מופיעה בזמן שרטוט וגרירה' : 'מגדלת כבויה'); };
+  $('#aStep').onchange = e => { S.settings.planStep = +e.target.value; save(); toast(`הצמדה לכל ${e.target.value} ס"מ`); };
   document.querySelectorAll('#tools .chip').forEach(c => c.onclick = () => { if (c.dataset.t === 'furn') { furnPicker(); return; } setTool(c.dataset.t); });
   $('#wtSel').onchange = (e) => { P.wallType = e.target.value; setTool('wall'); };
 }
@@ -449,6 +498,7 @@ function bindPointer() {
       P.cursor = null; draw(); return;
     }
     const pt = toWorld(e.clientX, e.clientY);
+    if (P.tool === 'magic') { P.gesture = { type: 'lasso', pts: [pt], sx: e.clientX, sy: e.clientY, view: { ...P.view } }; P.lasso = P.gesture.pts; draw(); return; }
     const drawing = ['wall', 'calib'].includes(P.tool);
     P.gesture = { type: drawing ? 'draw' : 'tap', sx: e.clientX, sy: e.clientY, view: { ...P.view }, moved: false };
     if (P.tool === 'select' && !P.showOriginal) {
@@ -479,7 +529,9 @@ function bindPointer() {
       P.view.s = Math.max(0.05, Math.min(8, g.view.s * f));
       P.view.tx = cx - r.left - wx * P.view.s; P.view.ty = cy - r.top - wy * P.view.s; draw(); return;
     }
+    if (g.type === 'lasso') { g.pts.push(toWorld(e.clientX, e.clientY)); draw(); return; }
     if (Math.hypot(e.clientX - g.sx, e.clientY - g.sy) > 6) g.moved = true;
+    if (['draw', 'drag', 'wend', 'wmove'].includes(g.type)) P.lpt = { cx: e.clientX, cy: e.clientY };
     if (g.type === 'draw') { P.cursor = snap(toWorld(e.clientX, e.clientY), P.tool === 'wall' ? P.chain : P.calib?.a); draw(); }
     else if (g.type === 'drag') { if (g.moved) { const w = toWorld(e.clientX, e.clientY), st = P.view.s > 1.2 ? 1 : P.view.s > 0.5 ? 2 : 5; g.f.x = Math.round((w.x + g.ox) / st) * st; g.f.y = Math.round((w.y + g.oy) / st) * st; draw(); } }
     else if (g.type === 'wmove') { if (g.moved) { const w = toWorld(e.clientX, e.clientY), st = P.view.s > 1.2 ? 1 : 5;
@@ -498,7 +550,15 @@ function bindPointer() {
     P.pointers.delete(e.pointerId);
     const g = P.gesture;
     if (g?.type === 'pinch') { if (P.pointers.size === 0) P.gesture = null; return; }
-    P.gesture = null; if (!g) return;
+    P.gesture = null; P.lpt = null; if (!g) return;
+    if (g.type === 'lasso') {
+      P.lasso = null; const poly = g.pts;
+      if (poly.length < 6) { draw(); return toast('מקיפים באצבע את האזור העקום'); }
+      const inside = P.plan.walls.filter(w => pointInPoly({ x: w.x1, y: w.y1 }, poly) || pointInPoly({ x: w.x2, y: w.y2 }, poly) || pointInPoly({ x: (w.x1 + w.x2) / 2, y: (w.y1 + w.y2) / 2 }, poly));
+      if (!inside.length) { draw(); return toast('לא נמצאו קירות בתוך העיגול'); }
+      if (inside.some(w => w.type === 'mamad')) toast('קירות ממ"ד לא זזים — מיישר רק את השאר');
+      const n = straighten(inside.filter(w => w.type !== 'mamad')); changed(); draw(); renderProps(); toast(`🪄 יושרו ${n} קירות · אפשר לבטל ב-↶`); return;
+    }
     if (g.type === 'draw' && P.cursor) return commitPoint(P.cursor);
     if (g.type === 'wmove' || g.type === 'wend') { if (g.moved) { if (g.w.type === 'bearing') toast('⚠️ קיר נושא — שינוי מחייב קונסטרוקטור'); changed(); } draw(); renderProps(); return; }
     if (g.type === 'drag' || g.type === 'rot') { if (g.moved) { changed(); draw(); renderProps(); } else if (g.type === 'drag') { draw(); renderProps(); } return; }
@@ -523,6 +583,27 @@ function commitPoint(pt) {
   P.chain = { x: pt.x, y: pt.y }; P.cursor = null; changed(); draw(); renderProps();
 }
 
+// 🪄 יישור: מאחד קצוות קרובים, ומיישר כל קיר לאופקי / אנכי / 45° — קירות מחוברים נשארים מחוברים
+function straighten(walls) {
+  if (!walls.length) return 0; const STEP = AID().step, tolJoin = 30;
+  // 1. סגירת פינות: קצוות קרובים → נקודה אחת
+  const ends = walls.flatMap(w => [[w, 1], [w, 2]]), all = P.plan.walls.flatMap(w => [[w, 1], [w, 2]]);
+  for (const [w, e] of ends) for (const [o, k] of all) if (!(o === w && k === e)) {
+    const d = Math.hypot(w['x' + e] - o['x' + k], w['y' + e] - o['y' + k]); if (d > 0.5 && d < tolJoin) { o['x' + k] = w['x' + e]; o['y' + k] = w['y' + e]; }
+  }
+  const moveEnd = (w, e, x, y) => { const links = linkedEnds(w, e); w['x' + e] = x; w['y' + e] = y; for (const [o, k] of links) { o['x' + k] = x; o['y' + k] = y; } };
+  // 2. יישור זוויות (כמה סבבים כדי שהשינויים יתייצבו)
+  for (let r = 0; r < 4; r++) for (const w of walls) {
+    const dx = w.x2 - w.x1, dy = w.y2 - w.y1, a = Math.atan2(dy, dx) * 180 / Math.PI, L = Math.hypot(dx, dy); if (L < 1) continue;
+    const t = Math.round(a / 45) * 45; if (Math.abs(a - t) > 20) continue;
+    if (t % 180 === 0) { const y = Math.round((w.y1 + w.y2) / 2 / STEP) * STEP; moveEnd(w, 1, w.x1, y); moveEnd(w, 2, w.x2, y); }
+    else if (Math.abs(t) % 180 === 90) { const x = Math.round((w.x1 + w.x2) / 2 / STEP) * STEP; moveEnd(w, 1, x, w.y1); moveEnd(w, 2, x, w.y2); }
+    else { const rad = t * Math.PI / 180; moveEnd(w, 2, Math.round(w.x1 + Math.cos(rad) * L), Math.round(w.y1 + Math.sin(rad) * L)); }
+  }
+  for (const w of walls) clampOpenings(w);
+  return walls.length;
+}
+function pointInPoly(p, poly) { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) c = !c; } return c; }
 function selWall() { if (P.sel?.kind !== 'wall' || P.showOriginal || P.tool !== 'select') return null; return P.plan.walls.find(x => x.id === P.sel.id) || null; }
 function hitWallEnd(pt) { const w = selWall(); if (!w) return null; const r = 22 / P.view.s; if (Math.hypot(pt.x - w.x1, pt.y - w.y1) < r) return { w, end: 1 }; if (Math.hypot(pt.x - w.x2, pt.y - w.y2) < r) return { w, end: 2 }; return null; }
 // קצוות של קירות אחרים שמחוברים לקצה הזה — זזים איתו כדי שהבית יישאר מחובר
@@ -610,6 +691,13 @@ function onTap(pt) {
 // ---------------- פאנל מאפיינים ----------------
 function renderFBar() {
   const bar = $('#fbar'); if (!bar) return; const f = selFurn(), wsel = selWall();
+  if (P.tool === 'magic' && !P.showOriginal) {
+    bar.style.display = 'flex';
+    bar.innerHTML = `<div class="muted" style="width:100%;text-align:center;font-size:12px">מקיפים באצבע את האזור העקום ✍️</div><button class="btn sm" id="mgAll">🪄 יישור כל התוכנית</button><button class="btn sec sm" id="mgX">✓ סיום</button>`;
+    $('#mgAll', bar).onclick = () => { const n = straighten(P.plan.walls.filter(w => w.type !== 'mamad')); changed(); draw(); toast(`🪄 יושרו ${n} קירות · אפשר לבטל ב-↶`); };
+    $('#mgX', bar).onclick = () => setTool('select');
+    return;
+  }
   if (wsel && wsel.type !== 'mamad') {
     bar.style.display = 'flex';
     bar.innerHTML = `<button class="btn sec sm" data-n="0,-1">▲</button><button class="btn sec sm" data-n="0,1">▼</button><button class="btn sec sm" data-n="1,0">▶</button><button class="btn sec sm" data-n="-1,0">◀</button><button class="btn sec sm" id="wcopy">⧉ העתקה</button><button class="btn sm" id="fok">✓</button>
