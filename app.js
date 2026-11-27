@@ -2,7 +2,7 @@
 // מעצב חכם — אפליקציית סקיצות לעיצוב פנים והום סטיילינג
 // חי אפליקציות
 // =====================================================================
-const APP_VERSION = '1.1.3';
+const APP_VERSION = '1.1.4';
 const DEFAULT_MODEL = 'gemini-2.5-flash-image';
 // רמות איכות להדמיה — לכל רמה רשימת מודלים לפי סדר (אם גוגל מחליפה שם, עוברים לבא / למה שגוגל ממליצה)
 const TIERS = {
@@ -2259,7 +2259,7 @@ function planRulesCard(ed) {
   const p = planRulesNow(), L = { red: '🔴 אסור', orange: '🟠 באזהרה', green: '🟢 מותר' };
   const sel = (k, act, v) => `<select data-pw="${k}|${act}" style="padding:6px;width:auto">${['red', 'orange', 'green'].map(l => `<option value="${l}" ${v === l ? 'selected' : ''}>${L[l]}</option>`).join('')}</select>`;
   const num = (grp, k, v, label) => `<div><label>${label}</label><input type="number" inputmode="numeric" data-pn="${grp}|${k}" value="${v}" ${ed ? '' : 'disabled'}></div>`;
-  return `<div class="card"><h3>📐 כללי שרטוט — חלים על השרטוט, התלת־ממד, האזהרות וה-AI</h3>
+  return `<div class="card rsec" id="rs-plan"><h3>📐 כללי שרטוט — חלים על השרטוט, התלת־ממד, האזהרות וה-AI</h3>
     <div class="muted" style="margin-bottom:8px">כל שינוי כאן חל מיד בכל האפליקציה (וגם אצל השותפים במאגר).</div>
     ${Object.entries(p.walls).map(([k, r]) => `<div class="rule ${[r.open, r.change, r.remove].includes('red') ? 'red' : [r.open, r.change, r.remove].includes('orange') ? 'orange' : 'green'}"><span class="dot ${[r.open, r.change, r.remove].includes('red') ? 'red' : [r.open, r.change, r.remove].includes('orange') ? 'orange' : 'green'}"></span><div class="grow"><b>${esc(r.name)}</b>
       ${ed ? `<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:6px"><span>פתיחת פתח</span>${sel(k, 'open', r.open)}<span>הזזה / שינוי</span>${sel(k, 'change', r.change)}<span>הריסה</span>${sel(k, 'remove', r.remove)}
@@ -2284,6 +2284,52 @@ function bindPlanRules(app) {
   app.querySelectorAll('[data-pth]').forEach(el => el.onchange = () => { const a = el.value.split(/[ ,]+/).map(Number).filter(v => v > 0).sort((x, y) => x - y); if (!a.length) return; C().thick = a; rulesChanged(); toast('עוביי הקיר עודכנו'); render(); });
   app.querySelectorAll('[data-pn]').forEach(el => el.onchange = () => { const [g, k] = el.dataset.pn.split('|'), p = C(), v = +el.value; if (!(v >= 0)) return; p[g][k] = v; rulesChanged(); toast('הכלל עודכן'); });
 }
+// 📑 כל הכללים כרשימה אחת — למפתח, לחיפוש ולהדפסה
+function allRulesList() {
+  const L = { red: 'אסור', orange: 'דורש בדיקה', green: 'המלצה' }, out = [];
+  const add = (sec, title, level, text, sub) => out.push({ sec, title, level, text, sub: sub || '' });
+  planRuleLines().slice(1).forEach(r => add('plan', '📐 כללי שרטוט', r.level, r.text));
+  const secs = [['_all', '🏠 כללי — כל החדרים'], ...ROOM_CATS.map(c => [c.id, c.icon + ' ' + c.name])];
+  for (const [k, t] of secs) {
+    (R().fixed[k] || []).forEach(f => add(k, t, f.level, f.text));
+    (R().checks[k] || []).forEach(c => add(k, t, c.level, c.label + (c.min != null || c.max != null ? ` — ${c.min != null ? 'מינ׳ ' + c.min : ''}${c.min != null && c.max != null ? ', ' : ''}${c.max != null ? 'מקס׳ ' + c.max : ''} ס"מ` : ''), c.msg));
+  }
+  BED_SIZES.forEach(b => add('beds', '🛏️ מידות מיטות', 'green', `${b.name}: ${b.size}`));
+  out.forEach(r => r.L = L[r.level] || ''); return out;
+}
+const azKey = (t) => t.replace(/^[^א-תA-Za-z0-9]+/, '');
+function jumpRule(app, r) {
+  const c = app.querySelector('#rs-' + CSS.escape(r.sec)); if (!c) return; const rs = $('#rSearch'); if (rs && rs.value) { rs.value = ''; rs.oninput(); }
+  const key = r.text.slice(0, 18), row = [...c.querySelectorAll('.rule')].find(x => x.textContent.replace(/\s+/g, ' ').includes(key.replace(/\s+/g, ' '))) || c;
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' }); row.style.transition = 'box-shadow .3s'; row.style.boxShadow = '0 0 0 3px #b5734e'; setTimeout(() => row.style.boxShadow = '', 1800);
+}
+function rulesIndexDialog(app) {
+  const all = allRulesList(), secs = [...new Map(all.map(r => [r.sec, r.title])).entries()];
+  const az = all.slice().sort((a, b) => azKey(a.text).localeCompare(azKey(b.text), 'he')), letters = [...new Set(az.map(r => azKey(r.text)[0] || '#'))];
+  modal('📑 מפתח הכללים', `<div class="row" style="gap:6px;margin-bottom:8px"><button class="chip on" id="ixT">לפי נושא</button><button class="chip" id="ixA">א–ב</button></div>
+    <div id="ixTopics">${secs.map(([k, t]) => `<div class="rule" data-ix="${k}" style="cursor:pointer"><div class="grow"><b>${esc(t)}</b></div><span class="muted">${all.filter(r => r.sec === k).length} כללים ›</span></div>`).join('')}</div>
+    <div id="ixAZ" style="display:none"><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">${letters.map(l => `<button class="chip" data-lt="${esc(l)}" style="padding:3px 8px">${esc(l)}</button>`).join('')}</div>
+      <div id="ixList" style="max-height:55vh;overflow:auto">${letters.map(l => `<div id="lt-${esc(l)}" style="font-weight:800;color:#b5734e;margin:8px 0 2px">${esc(l)}</div>` + az.filter(r => (azKey(r.text)[0] || '#') === l).map(r => `<div class="rule ${r.level}" data-az="${all.indexOf(r)}" style="cursor:pointer;padding:6px 10px"><span class="dot ${r.level}"></span><div class="grow" style="font-size:13px">${esc(r.text.length > 110 ? r.text.slice(0, 110) + '…' : r.text)}<div class="muted" style="font-size:11px">${esc(r.title)}</div></div></div>`).join('')).join('')}</div></div>`, (b, close) => {
+    const tab = (a) => { $('#ixTopics', b).style.display = a ? 'none' : ''; $('#ixAZ', b).style.display = a ? '' : 'none'; $('#ixT', b).classList.toggle('on', !a); $('#ixA', b).classList.toggle('on', a); };
+    $('#ixT', b).onclick = () => tab(0); $('#ixA', b).onclick = () => tab(1);
+    b.querySelectorAll('[data-lt]').forEach(x => x.onclick = () => { const t = b.querySelector('#lt-' + CSS.escape(x.dataset.lt)); if (t) $('#ixList', b).scrollTop = t.offsetTop - $('#ixList', b).offsetTop; });
+    b.querySelectorAll('[data-ix]').forEach(x => x.onclick = () => { close(); setTimeout(() => app.querySelector('#rs-' + CSS.escape(x.dataset.ix))?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120); });
+    b.querySelectorAll('[data-az]').forEach(x => x.onclick = () => { close(); setTimeout(() => jumpRule(app, all[+x.dataset.az]), 120); });
+  });
+}
+// 🖨️ הדפסת ספר הכללים: מפתח לפי נושא, כל הכללים, ומפתח א–ב בסוף
+function printRules() {
+  const all = allRulesList(), secs = [...new Map(all.map(r => [r.sec, r.title])).entries()], C = { red: '#c0392b', orange: '#d68910', green: '#2e8b57' };
+  const q = ($('#rSearch')?.value || '').trim().toLowerCase(), qs = q.split(/\s+/).filter(Boolean).map(w => w.length >= 3 && /[הת]$/.test(w) ? w.slice(0, -1) : w), list = q ? all.filter(r => qs.every(w => (r.text + ' ' + r.sub + ' ' + r.title).toLowerCase().includes(w))) : all;
+  const az = list.slice().sort((a, b) => azKey(a.text).localeCompare(azKey(b.text), 'he'));
+  const row = (r) => `<tr><td style="width:14px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${C[r.level]}"></span></td><td>${esc(r.text)}${r.sub ? `<div style="color:#666;font-size:12px">${esc(r.sub)}</div>` : ''}</td><td style="width:70px;color:${C[r.level]}">${r.L}</td></tr>`;
+  $('#print').innerHTML = `<div class="pp" dir="rtl"><h1 style="margin:0">📏 ספר הכללים — מעצב חכם</h1><div style="color:#666">${new Date().toLocaleDateString('he-IL')}${q ? ` · תוצאות חיפוש: "${esc(q)}"` : ''} · ${list.length} כללים</div>
+    <p>🔴 אדום = אסור · 🟠 כתום = דורש בדיקה · 🟢 ירוק = המלצה מקצועית</p>
+    <h2>מפתח לפי נושא</h2><ol>${secs.filter(([k]) => list.some(r => r.sec === k)).map(([k, t]) => `<li>${esc(t)} — ${list.filter(r => r.sec === k).length} כללים</li>`).join('')}</ol></div>
+    ${secs.filter(([k]) => list.some(r => r.sec === k)).map(([k, t], i) => `<div style="padding:10px;page-break-inside:auto" dir="rtl"><h2>${i + 1}. ${esc(t)}</h2><table style="width:100%;border-collapse:collapse;font-size:13px">${list.filter(r => r.sec === k).map(row).join('')}</table></div>`).join('')}
+    <div class="pp" dir="rtl" style="page-break-before:always"><h2>מפתח א–ב</h2>${az.map(r => `<div style="font-size:12px;margin:2px 0"><span style="color:${C[r.level]}">●</span> ${esc(r.text.length > 90 ? r.text.slice(0, 90) + '…' : r.text)} <span style="color:#888">— ${esc(r.title)}</span></div>`).join('')}</div>`;
+  setTimeout(() => window.print(), 300);
+}
 function renderRules(app) {
   setHeader('ספר הכללים', false);
   const ed = !!V.editRules;
@@ -2291,7 +2337,7 @@ function renderRules(app) {
   const sec = (key, title) => {
     const fixed = R().fixed[key] || [], checks = R().checks[key] || [];
     if (!ed && !fixed.length && !checks.length) return '';
-    return `<div class="card"><h3>${title}</h3>
+    return `<div class="card rsec" id="rs-${key}"><h3>${title}</h3>
     ${fixed.map((f, i) => `<div class="rule ${f.level}"><span class="dot ${f.level}"></span><div class="grow">${esc(f.text)}</div>
       ${ed ? `<span class="note-ic" data-ef="${key}|${i}">✏️</span>` : ''}</div>`).join('')}
     ${checks.map((c, i) => `<div class="rule ${c.level}"><span class="dot ${c.level}"></span><div class="grow"><b>${esc(c.label)}</b>${c.min != null || c.max != null ? ` — ${c.min != null ? 'מינ׳ ' + c.min : ''}${c.min != null && c.max != null ? ', ' : ''}${c.max != null ? 'מקס׳ ' + c.max : ''} ס"מ` : ''}<br>${esc(c.msg)}</div>
@@ -2301,6 +2347,9 @@ function renderRules(app) {
   app.innerHTML = `
     <div class="row" style="margin-bottom:10px"><h2 class="grow" style="margin:0">📏 ספר הכללים</h2>
       <button class="btn ${ed ? '' : 'sec'} sm" id="edT">${ed ? '✓ סיום עריכה' : '✏️ עריכה'}</button></div>
+    <div class="row" style="gap:6px;margin-bottom:10px;position:sticky;top:0;z-index:3;background:var(--bg,#f6f2ec);padding:6px 0"><input id="rSearch" type="search" placeholder="🔍 חיפוש בכללים…" value="${esc(V.rq || '')}" style="flex:1;min-width:0">
+      <button class="btn sec sm" id="rIdx">📑 מפתח</button><button class="btn sec sm" id="rPrint">🖨️</button></div>
+    <div id="rNo" class="muted" style="display:none;text-align:center;padding:20px">לא נמצאו כללים</div>
     ${ed ? '<div class="muted" style="margin-bottom:10px">מצב עריכה: לוחצים ✏️ כדי לשנות או למחוק, או מוסיפים כלל חדש. השינויים מתעדכנים גם אצל השותפים במאגר.</div>' : ''}
     <div class="card"><div class="rule red"><span class="dot red"></span><div>אדום = אסור</div></div>
       <div class="rule orange"><span class="dot orange"></span><div>כתום = דורש בדיקה</div></div>
@@ -2308,10 +2357,20 @@ function renderRules(app) {
     ${planRulesCard(ed)}
     ${sec('_all', '🏠 כללי — כל החדרים')}
     ${ROOM_CATS.map(c => sec(c.id, c.icon + ' ' + c.name)).join('')}
-    <div class="card"><h3>🛏️ מידות מיטות</h3>${BED_SIZES.map(b => `<div class="row"><span class="grow">${b.name}</span><b>${b.size}</b></div>`).join('')}</div>
+    <div class="card rsec" id="rs-beds"><h3>🛏️ מידות מיטות</h3>${BED_SIZES.map(b => `<div class="row rule" style="background:none;padding:4px 0"><span class="grow">${b.name}</span><b>${b.size}</b></div>`).join('')}</div>
     ${ed && S.custom ? '<button class="btn danger full" id="resetR">שחזור הכללים המקוריים</button><div style="height:10px"></div>' : ''}
     <div class="muted">הכללים מבוססים על חומרי הקורס ועל תקנים בישראל. הם עוזרים בסקיצה, ולא מחליפים איש מקצוע מוסמך.</div>`;
   $('#edT').onclick = () => { V.editRules = !ed; render(); };
+  const rs = $('#rSearch'), filt = () => { const q = (V.rq = rs.value.trim()).toLowerCase(); let any = 0;
+    const qs = q.split(/\s+/).filter(Boolean).map(w => w.length >= 3 && /[הת]$/.test(w) ? w.slice(0, -1) : w); // מיטה / מיטת / מיטות
+    const hit = (t) => { t = t.toLowerCase(); return qs.every(w => t.includes(w)); };
+    app.querySelectorAll('.rsec').forEach(c => { let n = 0; c.querySelectorAll('.rule, .grid2 > div').forEach(r => { const ok = !q || hit(r.textContent + ' ' + [...r.querySelectorAll('input')].map(i => i.value).join(' ')); r.style.display = ok ? '' : 'none'; if (ok) n++; });
+      const tOk = q && hit(c.querySelector('h3')?.textContent || ''); if (tOk) c.querySelectorAll('.rule, .grid2 > div').forEach(r => { r.style.display = ''; n++; });
+      c.style.display = !q || n ? '' : 'none'; if (n) any = 1; });
+    app.querySelectorAll('.card:not(.rsec)').forEach(c => c.style.display = q ? 'none' : ''); $('#rNo').style.display = q && !any ? '' : 'none'; };
+  rs.oninput = filt; if (V.rq) filt();
+  $('#rIdx').onclick = () => rulesIndexDialog(app);
+  $('#rPrint').onclick = printRules;
   bindPlanRules(app);
   app.querySelectorAll('[data-ef]').forEach(el => el.onclick = () => { const [k, i] = el.dataset.ef.split('|'); fixedRuleForm(k, +i); });
   app.querySelectorAll('[data-ec]').forEach(el => el.onclick = () => { const [k, i] = el.dataset.ec.split('|'); checkRuleForm(k, +i); });
