@@ -1310,7 +1310,7 @@ async function open3D(plan) {
     sel3 = f; furnGroups.forEach((g, id) => g.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(id === f?.id ? 0x553311 : 0); if (o.isSprite) o.material.color.setHex(id === f?.id ? 0xffe0c0 : 0xffffff); }));
     if (!f) { ED.style.display = 'none'; return; }
     const isCat = f.type === 'catItem';
-    ED.style.display = 'block'; ED.style.bottom = walking ? 'calc(150px + var(--safe-b))' : 'calc(10px + var(--safe-b))';
+    ED.style.display = 'block'; { const mp = m.querySelector('#matP'), mh = mp && mp.style.display === 'block' ? mp.offsetHeight : 0; ED.style.bottom = `calc(${(walking ? 150 : 10) + mh}px + var(--safe-b))`; }
     ED.innerHTML = `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><b style="flex:1;font-size:14px">${esc(f.name || FURN[f.type].name)}</b><span class="muted" style="font-size:12px">גוררים אותו באצבע כדי להזיז</span></div>
       <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:center">
         ${isCat ? '' : '<button class="btn sec sm" data-e="r-15">⟲15°</button><button class="btn sec sm" data-e="r15">⟳15°</button><button class="btn sec sm" data-e="r90">⟳90°</button>'}
@@ -1369,20 +1369,38 @@ async function open3D(plan) {
     const h = hitFurn3(e); select3(h ? h.f : null);
   }, true);
   // ---- חומרים ----
-  $('#mMat', m).onclick = () => {
+  // 🎨 מגירת חומרים בתחתית — גוללים לצדדים ורואים את השינוי מיד בתלת־ממד (בלי חלון שמסתיר)
+  let matTab = 'floor';
+  const MP = document.createElement('div'); MP.id = 'matP';
+  MP.style.cssText = 'position:absolute;left:0;right:0;bottom:0;z-index:4;background:rgba(255,253,250,.94);border-radius:16px 16px 0 0;box-shadow:0 -4px 16px #0003;padding:8px 8px calc(8px + var(--safe-b));display:none;color:var(--ink)';
+  m.firstElementChild.appendChild(MP);
+  const swFloor = (k) => { const c = floorCanvas(k), t = document.createElement('canvas'); t.width = t.height = 64; t.getContext('2d').drawImage(c, 0, 0, 256, 256, 0, 0, 64, 64); return t.toDataURL(); };
+  function drawMat() {
     const cat = (typeof S !== 'undefined' ? S.catalog : []).filter(x => !x.deleted && ['ריצוף', 'חיפוי קירות', 'משטחים'].includes(x.cat));
-    modal('🎨 חומרים בתלת־ממד', `<label>ריצוף</label><div class="chips">${Object.entries(FLOORS).map(([k, f]) => `<button class="chip${plan.mat.floor === k ? ' on' : ''}" data-f="${k}">${f.name}</button>`).join('')}</div>
-      ${cat.length ? `<label>או ריצוף מהקטלוג</label><div class="thumbs">${cat.map(it => `<div class="thumb" data-cf="${it.id}" style="${plan.mat.floor === 'cat:' + it.id ? 'outline:3px solid var(--accent)' : ''}"><img src="${it.th || ''}"><div class="cap">${esc(it.name)}</div></div>`).join('')}</div>` : '<div class="muted" style="margin-top:6px">כשיהיו בקטלוג מוצרי ריצוף — אפשר יהיה לבחור אותם כאן ולראות אותם על הרצפה.</div>'}
-      <label>צבע קירות</label><div class="chips">${PAINTS.map(([c, n]) => `<button class="chip${plan.mat.wall === c ? ' on' : ''}" data-w="${c}"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${c};border:1px solid #0003;vertical-align:-2px"></span> ${n}</button>`).join('')}</div>
-      <div class="row" style="margin-top:8px"><label style="margin:0">צבע אחר:</label><input type="color" id="wc" value="${plan.mat.wall}"></div>
-      <div class="muted" style="margin-top:8px">קירות נושאים וממ"ד נשארים בצבע הסימון שלהם, כדי שיהיה ברור מה אסור להזיז.</div>`, (b, close) => {
-      const apply = async () => { changed(); info = await build(showing); };
-      b.querySelectorAll('[data-f]').forEach(x => x.onclick = async () => { plan.mat.floor = x.dataset.f; b.querySelectorAll('[data-f]').forEach(y => y.classList.toggle('on', y === x)); await apply(); });
-      b.querySelectorAll('[data-cf]').forEach(x => x.onclick = async () => { plan.mat.floor = 'cat:' + x.dataset.cf; await apply(); close(); toast('הריצוף הוחלף'); });
-      b.querySelectorAll('[data-w]').forEach(x => x.onclick = async () => { plan.mat.wall = x.dataset.w; b.querySelectorAll('[data-w]').forEach(y => y.classList.toggle('on', y === x)); await apply(); });
-      b.querySelector('#wc').onchange = async e => { plan.mat.wall = e.target.value; await apply(); };
-    });
-  };
+    const item = (on, inner, attr, label) => `<div ${attr} style="flex:none;width:68px;text-align:center;cursor:pointer"><div style="width:60px;height:60px;margin:0 auto;border-radius:12px;overflow:hidden;border:3px solid ${on ? 'var(--accent)' : 'transparent'};box-shadow:0 1px 4px #0003">${inner}</div><div style="font-size:10.5px;line-height:1.15;margin-top:3px">${label}</div></div>`;
+    MP.innerHTML = `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <button class="chip ${matTab === 'floor' ? 'on' : ''}" data-mt="floor">🟫 ריצוף</button><button class="chip ${matTab === 'wall' ? 'on' : ''}" data-mt="wall">🎨 צבע קירות</button>
+        <span style="flex:1"></span><button class="btn sm" id="matX">✓ סגירה</button></div>
+      <div style="display:flex;gap:8px;overflow-x:auto;padding:2px 2px 4px;-webkit-overflow-scrolling:touch">${matTab === 'floor'
+        ? Object.entries(FLOORS).map(([k, f]) => item(plan.mat.floor === k, `<img src="${swFloor(k)}" style="width:100%;height:100%;display:block">`, `data-f="${k}"`, f.name)).join('')
+          + cat.map(it => item(plan.mat.floor === 'cat:' + it.id, `<img src="${it.th || ''}" style="width:100%;height:100%;object-fit:cover;display:block">`, `data-cf="${it.id}"`, esc(it.name))).join('')
+        : PAINTS.map(([c, n]) => item(plan.mat.wall === c, `<div style="width:100%;height:100%;background:${c}"></div>`, `data-w="${c}"`, n)).join('')
+          + `<label style="flex:none;width:68px;text-align:center"><div style="width:60px;height:60px;margin:0 auto;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px #0003;position:relative;background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red)"><input type="color" id="wc" value="${plan.mat.wall}" style="position:absolute;inset:0;opacity:0;width:100%;height:100%"></div><div style="font-size:10.5px;margin-top:3px">צבע אחר</div></label>`}</div>
+      ${matTab === 'wall' ? '<div class="muted" style="font-size:11px">קירות נושאים וממ"ד נשארים בצבע הסימון שלהם.</div>' : !cat.length ? '<div class="muted" style="font-size:11px">מוצרי ריצוף מהקטלוג יופיעו כאן אוטומטית.</div>' : ''}`;
+    const apply = async () => { changed(); info = await build(showing); drawMat(); };
+    MP.querySelectorAll('[data-mt]').forEach(x => x.onclick = () => { matTab = x.dataset.mt; drawMat(); });
+    MP.querySelectorAll('[data-f]').forEach(x => x.onclick = () => { plan.mat.floor = x.dataset.f; apply(); });
+    MP.querySelectorAll('[data-cf]').forEach(x => x.onclick = () => { plan.mat.floor = 'cat:' + x.dataset.cf; apply(); });
+    MP.querySelectorAll('[data-w]').forEach(x => x.onclick = () => { plan.mat.wall = x.dataset.w; apply(); });
+    const wc = MP.querySelector('#wc'); if (wc) wc.oninput = () => { plan.mat.wall = wc.value; changed(); build(showing).then(r => info = r); };
+    $('#matX', MP).onclick = () => toggleMat(false);
+  }
+  function toggleMat(on) {
+    MP.style.display = on ? 'block' : 'none'; if (on) drawMat();
+    J.style.bottom = on ? `calc(${MP.offsetHeight + 14}px + var(--safe-b))` : 'calc(24px + var(--safe-b))';
+    $('#mMat', m).classList.toggle('sec', !on);
+  }
+  $('#mMat', m).onclick = () => toggleMat(MP.style.display === 'none');
   // ---- הקלטת וידאו של מה שעל המסך (חינם, בלי AI) ----
   let rec = null;
   function recMime() { for (const t of ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm']) if (window.MediaRecorder?.isTypeSupported?.(t)) return t; return ''; }
